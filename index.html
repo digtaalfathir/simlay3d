@@ -58,6 +58,12 @@
   .seg button.on{background:var(--gold);color:var(--seg-on-text)}
   .seg button:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
 
+  #selScen{width:100%;padding:8px 10px;margin-bottom:8px;font:inherit;font-size:11.5px;
+    font-weight:600;color:var(--text);background:var(--seg-bg);
+    border:1px solid var(--panel-border);border-radius:9px;cursor:pointer}
+  #selScen option{background:var(--bg);color:var(--text)}
+  #selScen:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+
   /* play / stop */
   #simRow{display:flex;gap:8px;margin:10px 0 12px}
   #simRow button{flex:1;border:0;border-radius:9px;padding:10px 4px;font-size:12.5px;
@@ -94,6 +100,8 @@
     padding:8px 20px;font-size:11.5px;letter-spacing:.03em;color:var(--muted);
     backdrop-filter:blur(8px);white-space:nowrap;box-shadow:var(--shadow)}
   #flow b{color:var(--gold)}
+  #flow.bad{border-color:var(--alert);color:var(--text)}
+  #flow.bad b{color:var(--alert)}
 
   @media (max-width:720px){
     #panel{width:calc(100vw - 32px)}
@@ -125,6 +133,8 @@
     <button data-v="3d" class="on">Tampilan 3D</button>
     <button data-v="top">Denah (atas)</button>
   </div>
+
+  <select id="selScen" aria-label="Skenario simulasi"></select>
 
   <div id="simRow">
     <button id="btnPlay">&#9654;&nbsp;Play</button>
@@ -166,6 +176,7 @@ const C = {
   door:0x565E75, ok:0x2E9E57, alert:0xD6373C, path:0xC79A22, officer:0xD8DCE6
 };
 const ROOM = { w:12, d:8, h:3.2 };
+const GATE_Z = ROOM.d/2 - .45;   // sejajar marka lantai di depan pintu
 
 /* scene themes */
 const T3D = {
@@ -255,7 +266,7 @@ const roomRef = {};
 
   const hz = new THREE.Mesh(new THREE.PlaneGeometry(2.2,.5),
     new THREE.MeshStandardMaterial({color:0xC9A227, roughness:.9}));
-  hz.rotation.x=-Math.PI/2; hz.position.set(0,.015,ROOM.d/2-.45); g.add(hz);
+  hz.rotation.x=-Math.PI/2; hz.position.set(0,.015,GATE_Z); g.add(hz);
 })();
 
 function applyTheme(name){
@@ -303,7 +314,9 @@ function makeLabel(text, color){
 let conceptGroup=null, labelGroup=null, coverGroup=null;
 let pathLine=null, officer=null, goldInHand=null;
 let station={grp:null,ring:null,pulse:null}, door={panel:null,lamp:null,open:0};
-let timeline=null;
+let gate={scrMat:null,zoneMat:null};
+let timeline=null, flowText=null;
+let curC=1, curS='ok';
 
 function disposeGroup(g){
   if(!g) return;
@@ -411,6 +424,49 @@ function makeDoor(){
   return g;
 }
 
+/* RFID gate: sepasang pedestal di ambang pintu, panel antena saling berhadapan.
+   Aset saja — belum dipakai simulasi. */
+function makeGate(){
+  const g=new THREE.Group();
+  const bodyMat =new THREE.MeshStandardMaterial({color:0xD8DBE0,roughness:.45,metalness:.25});
+  const faceMat =new THREE.MeshStandardMaterial({color:0xEDEFF2,roughness:.3});
+  const plateMat=new THREE.MeshStandardMaterial({color:0xB4B8C0,roughness:.5,metalness:.5});
+  const darkMat =new THREE.MeshStandardMaterial({color:C.station,roughness:.6});
+  const scrMat  =new THREE.MeshStandardMaterial({color:C.screen,emissive:C.screen,emissiveIntensity:.6});
+
+  function pedestal(x, rotY, withScreen){
+    const p=new THREE.Group(); p.position.set(x,0,GATE_Z); p.rotation.y=rotY;
+    const plate=new THREE.Mesh(new THREE.BoxGeometry(.5,.03,.34),plateMat);
+    plate.position.y=.015; p.add(plate);
+    const base=new THREE.Mesh(new THREE.BoxGeometry(.36,.52,.16),bodyMat);
+    base.position.y=.29; p.add(base);
+    const slot=new THREE.Mesh(new THREE.BoxGeometry(.14,.02,.012),darkMat);
+    slot.position.set(0,.3,.086); p.add(slot);
+    const col=new THREE.Mesh(new THREE.BoxGeometry(.34,1.35,.10),bodyMat);
+    col.position.y=1.225; p.add(col);
+    const face=new THREE.Mesh(new THREE.PlaneGeometry(.30,1.26),faceMat);
+    face.position.set(0,1.225,.052); p.add(face);
+    const vent=new THREE.Mesh(new THREE.BoxGeometry(.18,.014,.012),darkMat);
+    vent.position.set(0,1.87,.054); p.add(vent);
+    if(withScreen){
+      const sb=new THREE.Mesh(new THREE.BoxGeometry(.22,.15,.03),darkMat);
+      sb.position.set(0,1.66,.055); p.add(sb);
+      const sf=new THREE.Mesh(new THREE.PlaneGeometry(.18,.11),scrMat);
+      sf.position.set(0,1.66,.072); p.add(sf);
+    }
+    return p;
+  }
+  g.add(pedestal(-.95,  Math.PI/2, false));
+  g.add(pedestal( .95, -Math.PI/2, true));
+
+  const zone=new THREE.Mesh(new THREE.BoxGeometry(1.8,1.7,.36),
+    new THREE.MeshBasicMaterial({color:C.cone,transparent:true,opacity:.07,
+      side:THREE.DoubleSide,depthWrite:false}));
+  zone.position.set(0,.85,GATE_Z); coverGroup.add(zone);
+  gate={scrMat, zoneMat:zone.material};
+  return g;
+}
+
 function makePath(pts){
   const v=pts.map(p=>new THREE.Vector3(p[0],.03,p[1]));
   const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(v),
@@ -430,8 +486,12 @@ function makeOfficer(){
   const head=new THREE.Mesh(new THREE.SphereGeometry(.14,10,8),
     new THREE.MeshStandardMaterial({color:C.officer,roughness:.6}));
   head.position.y=1.12; g.add(head);
-  goldInHand=new THREE.Mesh(new THREE.BoxGeometry(.22,.1,.14),goldMat);
-  goldInHand.position.set(.22,.75,.1); goldInHand.visible=false; g.add(goldInHand);
+  goldInHand=new THREE.Group();          // 3 batang; jumlah tampil diatur skenario
+  for(let i=0;i<3;i++){
+    const b=new THREE.Mesh(new THREE.BoxGeometry(.22,.1,.14),goldMat);
+    b.position.set(.22,.68+i*.115,.1); goldInHand.add(b);
+  }
+  goldInHand.visible=false; g.add(goldInHand);
   return g;
 }
 
@@ -456,6 +516,7 @@ const CONCEPTS = {
   1: {
     stats:'<b>Rak</b> : 7 unit (dinding belakang)<br><b>Antena rak</b> : 4 langit-langit, diarahkan ke rak<br><b>Reader</b> : 1 unit &middot; 4 port<br><b>Station</b> : kiri-tengah &middot; masuk &amp; keluar via SPK',
     note:'Antena langit-langit = pemantauan area. Kontrol akses sepenuhnya lewat SPK &amp; verifikasi di station.',
+    toDoor:[],                                  // dari rak ke pintu: lintasan bebas
     build(){
       const origins=[]; for(let i=0;i<7;i++) origins.push({x:-4.5+i*1.5, z:-3.55});
       conceptGroup.add(buildRacks(origins));
@@ -478,6 +539,7 @@ const CONCEPTS = {
   2: {
     stats:'<b>Rak</b> : 15 unit (3 baris &times; 5 rak)<br><b>Antena rak</b> : 24 (2 per level &times; 4 level &times; 3 baris)<br><b>Reader</b> : 3 unit 8-port (1 per baris)<br><b>Station</b> : kiri-tengah &middot; masuk &amp; keluar via SPK',
     note:'Antena kiri-kanan per level: zona baca terfokus per level rak, risiko cross-read antar baris kecil.',
+    toDoor:[{x:4.5,z:-.55},{x:4.5,z:1.0},{x:2.0,z:1.6}],   // memutar lorong kanan, rak menghalangi
     build(){
       const rows=[-3.55,-1.55,.45];
       const origins=[];
@@ -511,6 +573,36 @@ const CONCEPTS = {
 };
 function place(sp,x,y,z){ sp.position.set(x,y,z); return sp; }
 
+/* ================= skenario =================
+   wps() menerima waypoint normal milik konsep dan mengembalikan versi skenario,
+   jadi jalur khusus konsep (memutar rak) tidak perlu ditulis dua kali. */
+const SPK_QTY = 2;
+const SCENARIOS = {
+  ok:{
+    label:'Normal — sesuai SPK',
+    bars:SPK_QTY,
+    wps:w=>w
+  },
+  surplus:{
+    label:'Ambil lebih dari SPK — station dilewati',
+    bars:SPK_QTY+1,
+    note:'Ambil 3 batang untuk SPK 2 batang, lalu lewati RFID Station. Gate di ambang pintu tetap membaca semua tag &rarr; mismatch, pintu tidak terbuka. Sembunyi di kantong tidak menolong: UHF RFID tembus kain, plastik, dan kulit.',
+    end:'<b>DITOLAK</b> &mdash; gate membaca 3 tag vs SPK 2 batang &middot; pintu terkunci, petugas tertahan di dalam',
+    text:{
+      pick:'Mengambil <b>3 batang</b> untuk SPK 2 batang &mdash; 1 di luar perintah',
+      denied:'Gate membaca <b>3 tag</b> vs SPK <b>2 batang</b> &mdash; MISMATCH, pintu tidak terbuka',
+      idle:'Pintu tetap terkunci &mdash; <b>petugas tidak bisa keluar</b>'
+    },
+    wps:(w,c)=>{
+      const i=w.findIndex(p=>p.event==='pick');
+      return w.slice(0,i)
+        .concat([{...w[i], dwell:1.9}])                    // ambil batang ekstra, sedikit lebih lama
+        .concat(CONCEPTS[c].toDoor)
+        .concat([{x:0, z:GATE_Z, dwell:4.0, event:'denied'}]);
+    }
+  }
+};
+
 /* ================= simulation state ================= */
 let simPlaying=false, simTime=0, simFinished=false;
 const $=id=>document.getElementById(id);
@@ -522,13 +614,17 @@ const FLOW_TEXT={
   pick:'Mengambil emas sesuai SPK &mdash; <b>tag RFID ikut terbawa</b>',
   scan:'Verifikasi di RFID Station &mdash; <b>mencocokkan tag vs SPK</b>',
   waitdoor:'Semua tag sesuai &mdash; <b>pintu terbuka, petugas keluar</b>',
+  denied:'Gate menolak &mdash; <b>pintu tidak terbuka</b>',
   idle:'Petugas keluar &mdash; <b>pintu terkunci kembali</b>'
 };
 const READY_TEXT='Siap &mdash; tekan <b>&#9654; Play</b> untuk memulai simulasi';
 const DONE_TEXT ='Simulasi selesai &mdash; tekan <b>&#9654; Play</b> untuk mengulang';
 let lastFlow='';
 
-function setFlow(html){ if(html!==lastFlow){ flowEl.innerHTML=html; lastFlow=html; } }
+function setFlow(html, bad){
+  if(html!==lastFlow){ flowEl.innerHTML=html; lastFlow=html; }
+  flowEl.classList.toggle('bad', !!bad);
+}
 function setSimUI(){
   $('btnPlay').disabled = simPlaying;
   $('btnStop').disabled = !simPlaying;
@@ -542,21 +638,28 @@ function resetSimVisuals(){
   door.lamp.material.color.setHex(C.alert);
   door.lamp.material.emissive.setHex(C.alert);
   station.pulse.material.opacity=0;
+  gate.scrMat.color.setHex(C.screen); gate.scrMat.emissive.setHex(C.screen);
+  gate.scrMat.emissiveIntensity=.6;
+  gate.zoneMat.color.setHex(C.cone); gate.zoneMat.opacity=.07;
 }
 function playSim(){
   simTime=0; simFinished=false; simPlaying=true;
-  setSimUI(); setFlow(FLOW_TEXT.walk);
+  setSimUI(); setFlow(flowText.walk);
 }
 function stopSim(finished){
   simPlaying=false; simTime=0; simFinished=!!finished;
   resetSimVisuals(); setSimUI();
-  setFlow(simFinished ? DONE_TEXT : READY_TEXT);
+  const end = SCENARIOS[curS].end || DONE_TEXT;
+  setFlow(simFinished ? end : READY_TEXT, simFinished && !!SCENARIOS[curS].end);
 }
 $('btnPlay').addEventListener('click', playSim);
 $('btnStop').addEventListener('click', ()=>stopSim(false));
 
 /* ================= build / switch ================= */
-function build(c){
+function build(c, s){
+  curC=c; if(s) curS=s;
+  const SCEN=SCENARIOS[curS];
+  flowText=Object.assign({}, FLOW_TEXT, SCEN.text);
   disposeGroup(conceptGroup); disposeGroup(labelGroup); disposeGroup(coverGroup);
   disposeGroup(pathLine); disposeGroup(officer);
   conceptGroup=new THREE.Group(); labelGroup=new THREE.Group(); coverGroup=new THREE.Group();
@@ -564,17 +667,22 @@ function build(c){
 
   conceptGroup.add(makeStation(-4.9, 0, Math.PI/2));
   conceptGroup.add(makeDoor());
+  conceptGroup.add(makeGate());
+  labelGroup.add(place(makeLabel('RFID GATE','#E9EBEE'), -1.95, 2.05, GATE_Z));
   labelGroup.add(place(makeLabel('RFID STATION','#3ED0C2'), -4.6, 1.9, 0));
   labelGroup.add(place(makeLabel('PINTU','#E8EAF2'), 0, 2.8, 4.0));
   labelGroup.add(place(makeLabel('SCAN SPK','#3ED0C2'), 1.9, 1.7, 4.35));
 
-  const wps = CONCEPTS[c].build();
+  const wps = SCEN.wps(CONCEPTS[c].build(), c);
   timeline = buildTimeline(wps);
   pathLine = makePath(wps.map(p=>[p.x,p.z])); scene.add(pathLine);
   officer = makeOfficer(); scene.add(officer);
+  goldInHand.children.forEach((b,i)=>b.visible = i < SCEN.bars);
 
-  $('stats').innerHTML = CONCEPTS[c].stats + '<br><b>Ruangan</b> : 12 &times; 8 &times; 3.2 m';
-  $('note').innerHTML = CONCEPTS[c].note;
+  $('stats').innerHTML = CONCEPTS[c].stats
+    + '<br><b>Ruangan</b> : 12 &times; 8 &times; 3.2 m'
+    + '<br><b>SPK</b> : ' + SPK_QTY + ' batang &middot; <b>dibawa</b> : ' + SCEN.bars + ' batang';
+  $('note').innerHTML = SCEN.note || CONCEPTS[c].note;
 
   applyTheme(document.body.classList.contains('dark') ? 'dark' : 'light');
   stopSim(false);          // switching concepts: stop + reset, wait for Play
@@ -587,6 +695,11 @@ $('segConcept').addEventListener('click',e=>{
   [...$('segConcept').children].forEach(x=>x.classList.toggle('on',x===b));
   build(+b.dataset.c);
 });
+Object.entries(SCENARIOS).forEach(([k,v])=>{
+  const o=document.createElement('option'); o.value=k; o.textContent=v.label;
+  $('selScen').appendChild(o);
+});
+$('selScen').addEventListener('change',e=>build(curC, e.target.value));
 $('segView').addEventListener('click',e=>{
   const b=e.target.closest('button'); if(!b) return;
   [...$('segView').children].forEach(x=>x.classList.toggle('on',x===b));
@@ -634,7 +747,8 @@ function animate(){
       officer.position.set(px,0,pz);
 
       const pk=timeline.win.pick;
-      goldInHand.visible = pk && ct>pk[1]-0.05 && seg.type!=='idle';
+      // pada skenario gagal emas tetap di tangan saat idle — petugas belum keluar
+      goldInHand.visible = pk && ct>pk[1]-0.05 && (seg.type!=='idle' || curS!=='ok');
 
       const sc=timeline.win.scan;
       const scanning = sc && ct>=sc[0] && ct<sc[1];
@@ -657,8 +771,22 @@ function animate(){
       door.lamp.material.color.setHex(lampC);
       door.lamp.material.emissive.setHex(lampC);
 
-      const key = FLOW_TEXT[mode] ? mode : 'walk';
-      setFlow(FLOW_TEXT[key]);
+      // gate: hijau saat cocok, merah berkedip saat mismatch
+      const dn=timeline.win.denied, wd=timeline.win.waitdoor;
+      if(dn && ct>=dn[0]){
+        const on = ((ct-dn[0])%.6) < .3;
+        gate.scrMat.color.setHex(C.alert); gate.scrMat.emissive.setHex(C.alert);
+        gate.scrMat.emissiveIntensity = on ? 1.3 : .35;
+        gate.zoneMat.color.setHex(C.alert);
+        gate.zoneMat.opacity = on ? .24 : .10;
+      }else if(wd && ct>=wd[0]-.3){
+        gate.scrMat.color.setHex(C.ok); gate.scrMat.emissive.setHex(C.ok);
+        gate.scrMat.emissiveIntensity=1.0;
+        gate.zoneMat.color.setHex(C.ok); gate.zoneMat.opacity=.16;
+      }
+
+      const key = flowText[mode] ? mode : 'walk';
+      setFlow(flowText[key], curS!=='ok' && (key==='denied'||key==='idle'));
     }else{
       // idle scene: gentle breathing on the reading ring
       station.ring.material.opacity=.32+.08*Math.sin(tGlobal*2);
@@ -677,7 +805,7 @@ addEventListener('resize',()=>{
 });
 
 applyTheme('dark');   // default Dark Mode (body.dark set in HTML to avoid light flash)
-build(1);
+build(1,'ok');
 animate();
 })();
 </script>
