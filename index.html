@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stechoq 3D — Konsep Gold Vault RFID</title>
+<style>
+  :root{
+    --gold:#C79A22; --gold-soft:#DFB63C; --ok:#2E9E57; --alert:#D6373C;
+    --accent-teal:#0FA3A3;
+    /* light theme (body.dark is the default, set in HTML) */
+    --bg:#EDEFF4; --panel:rgba(255,255,255,.92); --panel-border:#D5D9E4;
+    --text:#1D2333; --muted:#5B6478; --seg-bg:#EDEFF4; --seg-on-text:#171204;
+    --chip:rgba(255,255,255,.9); --shadow:0 10px 34px rgba(25,32,60,.16);
+    --header:rgba(255,255,255,.86); --header-border:#D5D9E4;
+  }
+  body.dark{
+    --bg:#0D101C; --panel:rgba(20,25,52,.9); --panel-border:#333C6B;
+    --text:#E8EAF2; --muted:#98A0B3; --seg-bg:#0D101C;
+    --chip:rgba(20,25,52,.88); --shadow:0 12px 40px rgba(0,0,0,.5);
+    --header:rgba(15,18,34,.88); --header-border:#2A3358;
+    --gold:#DFB63C; --ok:#46C46E; --alert:#E5484D; --accent-teal:#3ED0C2;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:var(--bg);
+    font-family:"Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,sans-serif;color:var(--text)}
+  #scene{position:fixed;inset:0}
+  .mono{font-family:ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,monospace}
+
+  /* ---------- header ---------- */
+  #header{position:fixed;top:0;left:0;right:0;height:54px;z-index:20;
+    display:flex;align-items:center;justify-content:space-between;padding:0 18px;
+    background:var(--header);backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--header-border)}
+  #brand{font-size:16px;font-weight:600;letter-spacing:.04em;user-select:none}
+  #brand b{color:var(--gold);font-weight:700}
+  #themeSeg{display:flex;background:var(--seg-bg);border:1px solid var(--panel-border);
+    border-radius:99px;overflow:hidden}
+  #themeSeg button{border:0;background:transparent;color:var(--muted);cursor:pointer;
+    font-size:12px;font-weight:600;padding:6px 14px;display:flex;align-items:center;gap:6px;
+    transition:background .15s,color .15s}
+  #themeSeg button.on{background:var(--gold);color:#171204}
+  #themeSeg button:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+
+  /* ---------- left control panel ---------- */
+  #panel{position:fixed;top:70px;left:16px;width:302px;z-index:10;
+    background:var(--panel);backdrop-filter:blur(10px);
+    border:1px solid var(--panel-border);border-radius:14px;padding:16px;
+    box-shadow:var(--shadow)}
+  #panel h1{font-size:12px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--gold);font-weight:700;margin-bottom:2px}
+  #panel .sub{font-size:11px;color:var(--muted);margin-bottom:12px}
+  .seg{display:flex;background:var(--seg-bg);border:1px solid var(--panel-border);
+    border-radius:9px;overflow:hidden;margin-bottom:8px}
+  .seg button{flex:1;padding:8px 4px;font-size:11.5px;font-weight:600;border:0;
+    background:transparent;color:var(--muted);cursor:pointer;letter-spacing:.02em;
+    transition:background .15s,color .15s}
+  .seg button.on{background:var(--gold);color:var(--seg-on-text)}
+  .seg button:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+
+  /* play / stop */
+  #simRow{display:flex;gap:8px;margin:10px 0 12px}
+  #simRow button{flex:1;border:0;border-radius:9px;padding:10px 4px;font-size:12.5px;
+    font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;
+    gap:7px;transition:filter .15s,opacity .15s,background .15s}
+  #btnPlay{background:var(--ok);color:#fff}
+  #btnPlay:hover{filter:brightness(1.07)}
+  #btnPlay:disabled{opacity:.45;cursor:default;filter:none}
+  #btnStop{background:transparent;color:var(--text);border:1.5px solid var(--panel-border)!important}
+  #btnStop:hover{border-color:var(--alert)!important;color:var(--alert)}
+  #btnStop:disabled{opacity:.4;cursor:default;border-color:var(--panel-border)!important;color:var(--muted)}
+  #simRow button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+  .checks{display:flex;flex-direction:column;gap:6px;margin:2px 0 10px}
+  .checks label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer}
+  .checks input{accent-color:var(--gold);width:14px;height:14px}
+  #stats{border-top:1px solid var(--panel-border);padding-top:10px;font-size:11.5px;
+    line-height:1.75;color:var(--muted)}
+  #stats b{color:var(--gold);font-weight:700}
+  #note{margin-top:8px;font-size:10.5px;line-height:1.5;color:var(--muted);
+    border-left:2px solid var(--gold);padding-left:8px}
+
+  /* ---------- legend ---------- */
+  #legend{position:fixed;right:16px;bottom:16px;z-index:10;display:flex;flex-wrap:wrap;
+    gap:6px;max-width:360px;justify-content:flex-end}
+  .chip{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--text);
+    background:var(--chip);border:1px solid var(--panel-border);border-radius:99px;
+    padding:4px 10px 4px 6px;backdrop-filter:blur(8px)}
+  .dot{width:10px;height:10px;border-radius:3px;flex:none}
+
+  /* ---------- flow status ---------- */
+  #flow{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:10;
+    background:var(--chip);border:1px solid var(--panel-border);border-radius:99px;
+    padding:8px 20px;font-size:11.5px;letter-spacing:.03em;color:var(--muted);
+    backdrop-filter:blur(8px);white-space:nowrap;box-shadow:var(--shadow)}
+  #flow b{color:var(--gold)}
+
+  @media (max-width:720px){
+    #panel{width:calc(100vw - 32px)}
+    #legend{display:none}
+    #flow{max-width:calc(100vw - 24px);white-space:normal;text-align:center}
+  }
+</style>
+</head>
+<body class="dark">
+<header id="header">
+  <div id="brand">Stechoq&nbsp;<b>3D</b></div>
+  <div id="themeSeg" role="group" aria-label="Tema tampilan">
+    <button data-t="dark" class="on">&#9789; Dark</button>
+    <button data-t="light">&#9728; Light</button>
+  </div>
+</header>
+
+<div id="scene"></div>
+
+<div id="panel">
+  <h1>Gold Vault &middot; RFID</h1>
+  <div class="sub">Studi tata letak &amp; verifikasi keluar-masuk</div>
+
+  <div class="seg" id="segConcept">
+    <button data-c="1" class="on">Konsep 1 &middot; Satu sisi</button>
+    <button data-c="2">Konsep 2 &middot; Penuh rak</button>
+  </div>
+  <div class="seg" id="segView">
+    <button data-v="3d" class="on">Tampilan 3D</button>
+    <button data-v="top">Denah (atas)</button>
+  </div>
+
+  <div id="simRow">
+    <button id="btnPlay">&#9654;&nbsp;Play</button>
+    <button id="btnStop" disabled>&#9632;&nbsp;Stop</button>
+  </div>
+
+  <div class="checks">
+    <label><input type="checkbox" id="ckCov" checked> Cakupan antena RFID</label>
+    <label><input type="checkbox" id="ckPath" checked> Jalur petugas</label>
+    <label><input type="checkbox" id="ckLabel" checked> Label ruangan</label>
+  </div>
+
+  <div id="stats" class="mono"></div>
+  <div id="note"></div>
+</div>
+
+<div id="legend">
+  <span class="chip"><span class="dot" style="background:#2A3268"></span>Rak emas</span>
+  <span class="chip"><span class="dot" style="background:#C79A22"></span>Emas / zona baca</span>
+  <span class="chip"><span class="dot" style="background:#B9BEC9;border:1px solid #8b8f99"></span>Antena RFID</span>
+  <span class="chip"><span class="dot" style="background:#0FA3A3"></span>RFID Station / SPK</span>
+  <span class="chip"><span class="dot" style="background:#2E9E57"></span>Pintu terbuka</span>
+  <span class="chip"><span class="dot" style="background:#D6373C"></span>Pintu terkunci</span>
+</div>
+
+<div id="flow" class="mono">Siap &mdash; tekan <b>&#9654; Play</b> untuk memulai simulasi</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+"use strict";
+if(!window.THREE){document.getElementById('flow').textContent='Gagal memuat Three.js';return;}
+
+/* ================= palette (3D objects) ================= */
+const C = {
+  rackBlue:0x2A3268, rackDark:0x1E2450, deck:0xCFC5A8, gold:0xDFB63C,
+  antenna:0xE9EBEE, antMount:0x3A4055, cone:0xDFB63C,
+  station:0x22252B, screen:0x3ED0C2, ring:0xC79A22,
+  door:0x565E75, ok:0x2E9E57, alert:0xD6373C, path:0xC79A22, officer:0xD8DCE6
+};
+const ROOM = { w:12, d:8, h:3.2 };
+
+/* scene themes */
+const T3D = {
+  light:{ bg:0xE7EAF1, fog:0xE7EAF1, floor:0xB9BEC9, wall:0x8B96B5, wallOp:.14,
+          edge:0x9AA3BE, hemi:1.0, hemiG:0xB8BCC8, sun:1.0, ring:0xC79A22 },
+  dark:{  bg:0x0D101C, fog:0x0D101C, floor:0x262B36, wall:0x39415F, wallOp:.16,
+          edge:0x4A5480, hemi:.85, hemiG:0x14161F, sun:.95, ring:0xDFB63C }
+};
+
+/* ================= renderer / scene ================= */
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, .1, 120);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+document.getElementById('scene').appendChild(renderer.domElement);
+
+const hemi = new THREE.HemisphereLight(0xFFFFFF, 0xB8BCC8, 1.0); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xFFF4DC, 1.0); sun.position.set(7,11,5); scene.add(sun);
+const fillL = new THREE.DirectionalLight(0x8FA3D9, .28); fillL.position.set(-8,6,-6); scene.add(fillL);
+
+/* ================= custom orbit ================= */
+const orbit = { theta:.72, phi:1.08, r:16.5, target:new THREE.Vector3(0,.9,.4), topView:false };
+function applyCam(){
+  if(orbit.topView){
+    camera.up.set(0,0,-1);
+    camera.position.set(orbit.target.x, orbit.r, orbit.target.z + .001);
+  }else{
+    camera.up.set(0,1,0);
+    const s = Math.sin(orbit.phi);
+    camera.position.set(
+      orbit.target.x + orbit.r*s*Math.sin(orbit.theta),
+      orbit.target.y + orbit.r*Math.cos(orbit.phi),
+      orbit.target.z + orbit.r*s*Math.cos(orbit.theta));
+  }
+  camera.lookAt(orbit.target);
+}
+let drag=null;
+renderer.domElement.addEventListener('pointerdown', e=>{drag={x:e.clientX,y:e.clientY};});
+addEventListener('pointerup', ()=>drag=null);
+addEventListener('pointermove', e=>{
+  if(!drag || orbit.topView) return;
+  orbit.theta -= (e.clientX-drag.x)*.006;
+  orbit.phi = Math.min(1.5, Math.max(.25, orbit.phi - (e.clientY-drag.y)*.005));
+  drag={x:e.clientX,y:e.clientY}; applyCam();
+});
+renderer.domElement.addEventListener('wheel', e=>{
+  e.preventDefault();
+  orbit.r = Math.min(34, Math.max(6, orbit.r * (1 + Math.sign(e.deltaY)*.08)));
+  applyCam();
+},{passive:false});
+applyCam();
+
+/* ================= static room (theme-aware refs) ================= */
+const roomRef = {};
+(function buildRoom(){
+  const g = new THREE.Group(); scene.add(g);
+  roomRef.floorMat = new THREE.MeshStandardMaterial({color:0xB9BEC9, roughness:.95});
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d), roomRef.floorMat);
+  floor.rotation.x = -Math.PI/2; g.add(floor);
+
+  roomRef.gridLight = new THREE.GridHelper(12, 12, 0x8F96A8, 0xA7ADBD);
+  roomRef.gridDark  = new THREE.GridHelper(12, 12, 0x3A4260, 0x2C3350);
+  [roomRef.gridLight, roomRef.gridDark].forEach(gr=>{
+    gr.position.y=.01; gr.scale.z = ROOM.d/ROOM.w; g.add(gr);
+  });
+  roomRef.gridDark.visible=false;
+
+  roomRef.wallMat = new THREE.MeshStandardMaterial({color:0x8B96B5, transparent:true,
+    opacity:.14, side:THREE.DoubleSide, depthWrite:false});
+  const mkWall = (w,h, x,y,z, ry)=>{
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), roomRef.wallMat);
+    m.position.set(x,y,z); m.rotation.y = ry||0; g.add(m);
+  };
+  mkWall(ROOM.w, ROOM.h, 0, ROOM.h/2, -ROOM.d/2, 0);
+  mkWall(ROOM.d, ROOM.h, -ROOM.w/2, ROOM.h/2, 0, Math.PI/2);
+  mkWall(ROOM.d, ROOM.h,  ROOM.w/2, ROOM.h/2, 0, Math.PI/2);
+  mkWall(ROOM.w/2-.8, ROOM.h, -(ROOM.w/2+.8)/2, ROOM.h/2, ROOM.d/2, 0);
+  mkWall(ROOM.w/2-.8, ROOM.h,  (ROOM.w/2+.8)/2, ROOM.h/2, ROOM.d/2, 0);
+  mkWall(1.6, ROOM.h-2.2, 0, 2.2+(ROOM.h-2.2)/2, ROOM.d/2, 0);
+
+  roomRef.edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(ROOM.w, ROOM.h, ROOM.d)),
+    new THREE.LineBasicMaterial({color:0x9AA3BE}));
+  roomRef.edges.position.y = ROOM.h/2; g.add(roomRef.edges);
+
+  const hz = new THREE.Mesh(new THREE.PlaneGeometry(2.2,.5),
+    new THREE.MeshStandardMaterial({color:0xC9A227, roughness:.9}));
+  hz.rotation.x=-Math.PI/2; hz.position.set(0,.015,ROOM.d/2-.45); g.add(hz);
+})();
+
+function applyTheme(name){
+  const t = T3D[name];
+  document.body.classList.toggle('dark', name==='dark');
+  scene.background = new THREE.Color(t.bg);
+  scene.fog = new THREE.Fog(t.fog, 26, 46);
+  roomRef.floorMat.color.setHex(t.floor);
+  roomRef.wallMat.color.setHex(t.wall);
+  roomRef.wallMat.opacity = t.wallOp;
+  roomRef.edges.material.color.setHex(t.edge);
+  roomRef.gridLight.visible = name==='light';
+  roomRef.gridDark.visible  = name==='dark';
+  hemi.intensity = t.hemi; hemi.groundColor.setHex(t.hemiG);
+  sun.intensity = t.sun;
+  if(station.ring) station.ring.material.color.setHex(t.ring);
+}
+
+/* ================= shared geoms/mats ================= */
+const postGeo  = new THREE.BoxGeometry(.06,1.9,.06);
+const shelfGeo = new THREE.BoxGeometry(1.24,.05,.5);
+const barGeo   = new THREE.BoxGeometry(.24,.05,.08);
+const rackMat  = new THREE.MeshStandardMaterial({color:C.rackBlue, roughness:.55, metalness:.3});
+const deckMat  = new THREE.MeshStandardMaterial({color:C.deck, roughness:.85});
+const goldMat  = new THREE.MeshStandardMaterial({color:C.gold, roughness:.3, metalness:1.0});
+const dummy = new THREE.Object3D();
+
+/* ================= labels ================= */
+function makeLabel(text, color){
+  const cv=document.createElement('canvas'); cv.width=512; cv.height=128;
+  const cx=cv.getContext('2d');
+  cx.font='600 52px "Segoe UI",sans-serif'; cx.textAlign='center'; cx.textBaseline='middle';
+  cx.fillStyle='rgba(24,29,48,.78)';
+  const w=cx.measureText(text).width+56;
+  if(cx.roundRect){ cx.beginPath(); cx.roundRect((512-w)/2,24,w,80,14); cx.fill(); }
+  else cx.fillRect((512-w)/2,24,w,80);
+  cx.fillStyle=color||'#F0D488'; cx.fillText(text,256,66);
+  const tx=new THREE.CanvasTexture(cv);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tx, depthTest:false}));
+  sp.scale.set(2.4,.6,1); sp.renderOrder=5;
+  return sp;
+}
+
+/* ================= concept group ================= */
+let conceptGroup=null, labelGroup=null, coverGroup=null;
+let pathLine=null, officer=null, goldInHand=null;
+let station={grp:null,ring:null,pulse:null}, door={panel:null,lamp:null,open:0};
+let timeline=null;
+
+function disposeGroup(g){
+  if(!g) return;
+  g.traverse(o=>{
+    if(o.geometry && ![postGeo,shelfGeo,barGeo].includes(o.geometry)) o.geometry.dispose();
+    if(o.material && ![rackMat,deckMat,goldMat].includes(o.material)){
+      (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{ if(m.map)m.map.dispose(); m.dispose(); });
+    }
+  });
+  scene.remove(g);
+}
+
+function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+
+function buildRacks(origins){
+  const posts=[], shelves=[], bars=[];
+  const rng = mulberry(42);
+  origins.forEach(o=>{
+    for(const sx of [-1,1]) for(const sz of [-1,1])
+      posts.push([o.x+sx*.62, .95, o.z+sz*.24]);
+    [.16,.62,1.08,1.54].forEach(y=>{
+      shelves.push([o.x, y, o.z]);
+      for(let i=0;i<4;i++) for(let j=0;j<2;j++){
+        if(rng()<.9) bars.push([o.x-.51+.17+i*.28 + (rng()-.5)*.02, y+.055,
+                                o.z-.12+j*.24 + (rng()-.5)*.02]);
+      }
+    });
+  });
+  function inst(geo, mat, list){
+    const im = new THREE.InstancedMesh(geo, mat, list.length);
+    list.forEach((p,i)=>{
+      dummy.position.set(p[0],p[1],p[2]); dummy.rotation.set(0,0,0);
+      dummy.updateMatrix(); im.setMatrixAt(i,dummy.matrix);
+    });
+    return im;
+  }
+  const g=new THREE.Group();
+  g.add(inst(postGeo,rackMat,posts));
+  g.add(inst(shelfGeo,deckMat,shelves));
+  g.add(inst(barGeo,goldMat,bars));
+  return g;
+}
+
+function makeAntenna(pos, aimAt, len, rad, op){
+  const grp=new THREE.Group(); grp.position.copy(pos);
+  const mount=new THREE.Mesh(new THREE.BoxGeometry(.06,.12,.06),
+    new THREE.MeshStandardMaterial({color:C.antMount,roughness:.6}));
+  mount.position.y=.10; grp.add(mount);
+  const dir=aimAt.clone().sub(pos).normalize();
+  const panel=new THREE.Mesh(new THREE.BoxGeometry(.34,.05,.34),
+    new THREE.MeshStandardMaterial({color:C.antenna,roughness:.4}));
+  panel.quaternion.setFromUnitVectors(new THREE.Vector3(0,-1,0), dir);
+  grp.add(panel);
+  const cgeo=new THREE.ConeGeometry(rad,len,14,1,true); cgeo.translate(0,-len/2,0);
+  const cone=new THREE.Mesh(cgeo, new THREE.MeshBasicMaterial({color:C.cone,
+    transparent:true,opacity:op||.13,side:THREE.DoubleSide,depthWrite:false}));
+  cone.quaternion.copy(panel.quaternion);
+  coverGroup.add(cone); cone.position.copy(pos);
+  return grp;
+}
+
+function makeStation(x,z,rotY){
+  const g=new THREE.Group(); g.position.set(x,0,z); g.rotation.y=rotY||0;
+  const mat=new THREE.MeshStandardMaterial({color:C.station,roughness:.6});
+  const base=new THREE.Mesh(new THREE.BoxGeometry(.5,.18,.4),mat); base.position.y=.14; g.add(base);
+  const col=new THREE.Mesh(new THREE.BoxGeometry(.09,.7,.09),mat); col.position.y=.58; g.add(col);
+  const scr=new THREE.Mesh(new THREE.BoxGeometry(.44,.32,.05),mat); scr.position.set(0,1.05,.06);
+  scr.rotation.x=-.55; g.add(scr);
+  const face=new THREE.Mesh(new THREE.PlaneGeometry(.38,.26),
+    new THREE.MeshStandardMaterial({color:C.screen,emissive:C.screen,emissiveIntensity:.7}));
+  face.position.set(0,1.06,.095); face.rotation.x=-.55; g.add(face);
+  const ring=new THREE.Mesh(new THREE.RingGeometry(.72,.9,40),
+    new THREE.MeshBasicMaterial({color:C.ring,transparent:true,opacity:.4,side:THREE.DoubleSide}));
+  ring.rotation.x=-Math.PI/2; ring.position.y=.02; g.add(ring);
+  const pulse=new THREE.Mesh(new THREE.RingGeometry(.2,.26,40),
+    new THREE.MeshBasicMaterial({color:C.ring,transparent:true,opacity:0,side:THREE.DoubleSide}));
+  pulse.rotation.x=-Math.PI/2; pulse.position.y=.03; g.add(pulse);
+  station={grp:g,ring,pulse,pos:new THREE.Vector3(x,0,z)};
+  return g;
+}
+
+function makeDoor(){
+  const g=new THREE.Group();
+  const fmat=new THREE.MeshStandardMaterial({color:0x3A4368,roughness:.6});
+  for(const sx of [-1,1]){
+    const jamb=new THREE.Mesh(new THREE.BoxGeometry(.12,2.2,.16),fmat);
+    jamb.position.set(sx*.86,1.1,ROOM.d/2); g.add(jamb);
+  }
+  const head=new THREE.Mesh(new THREE.BoxGeometry(1.9,.14,.16),fmat);
+  head.position.set(0,2.24,ROOM.d/2); g.add(head);
+  const panel=new THREE.Mesh(new THREE.BoxGeometry(1.6,2.15,.07),
+    new THREE.MeshStandardMaterial({color:C.door,roughness:.5,metalness:.3}));
+  panel.position.set(0,1.08,ROOM.d/2); g.add(panel);
+  const lamp=new THREE.Mesh(new THREE.SphereGeometry(.06,10,8),
+    new THREE.MeshStandardMaterial({color:C.alert,emissive:C.alert,emissiveIntensity:1}));
+  lamp.position.set(1.05,2.05,ROOM.d/2+.1); g.add(lamp);
+  const spkBox=new THREE.Mesh(new THREE.BoxGeometry(.26,.34,.08),
+    new THREE.MeshStandardMaterial({color:C.station,roughness:.6}));
+  spkBox.position.set(1.35,1.25,ROOM.d/2+.06); g.add(spkBox);
+  const spkScr=new THREE.Mesh(new THREE.PlaneGeometry(.2,.22),
+    new THREE.MeshStandardMaterial({color:C.screen,emissive:C.screen,emissiveIntensity:.7}));
+  spkScr.position.set(1.35,1.27,ROOM.d/2+.105); g.add(spkScr);
+  door={panel,lamp,open:0};
+  return g;
+}
+
+function makePath(pts){
+  const v=pts.map(p=>new THREE.Vector3(p[0],.03,p[1]));
+  const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(v),
+    new THREE.LineDashedMaterial({color:C.path,dashSize:.22,gapSize:.14,transparent:true,opacity:.9}));
+  line.computeLineDistances();
+  return line;
+}
+
+function makeOfficer(){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(.16,.2,.85,10),
+    new THREE.MeshStandardMaterial({color:0x3D4763,roughness:.7}));
+  body.position.y=.55; g.add(body);
+  const vest=new THREE.Mesh(new THREE.CylinderGeometry(.175,.2,.4,10),
+    new THREE.MeshStandardMaterial({color:0xC9A227,roughness:.8}));
+  vest.position.y=.7; g.add(vest);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.14,10,8),
+    new THREE.MeshStandardMaterial({color:C.officer,roughness:.6}));
+  head.position.y=1.12; g.add(head);
+  goldInHand=new THREE.Mesh(new THREE.BoxGeometry(.22,.1,.14),goldMat);
+  goldInHand.position.set(.22,.75,.1); goldInHand.visible=false; g.add(goldInHand);
+  return g;
+}
+
+function buildTimeline(wps){
+  const SPEED=1.5; let t=0; const segs=[];
+  for(let i=0;i<wps.length;i++){
+    if(i>0){
+      const a=wps[i-1],b=wps[i];
+      const d=Math.hypot(b.x-a.x,b.z-a.z), dur=d/SPEED;
+      segs.push({type:'walk',t0:t,t1:t+dur,a,b}); t+=dur;
+    }
+    if(wps[i].dwell){ segs.push({type:'dwell',t0:t,t1:t+wps[i].dwell,a:wps[i],ev:wps[i].event}); t+=wps[i].dwell; }
+  }
+  segs.push({type:'idle',t0:t,t1:t+1.4,a:wps[wps.length-1]});
+  const win={};
+  segs.forEach(s=>{ if(s.ev) win[s.ev]=[s.t0,s.t1]; });
+  return {segs,total:t+1.4,win,start:wps[0]};
+}
+
+/* ================= concepts ================= */
+const CONCEPTS = {
+  1: {
+    stats:'<b>Rak</b> : 7 unit (dinding belakang)<br><b>Antena rak</b> : 4 langit-langit, diarahkan ke rak<br><b>Reader</b> : 1 unit &middot; 4 port<br><b>Station</b> : kiri-tengah &middot; masuk &amp; keluar via SPK',
+    note:'Antena langit-langit = pemantauan area. Kontrol akses sepenuhnya lewat SPK &amp; verifikasi di station.',
+    build(){
+      const origins=[]; for(let i=0;i<7;i++) origins.push({x:-4.5+i*1.5, z:-3.55});
+      conceptGroup.add(buildRacks(origins));
+      for(let i=0;i<4;i++){
+        const x=-4.5+i*3;
+        conceptGroup.add(makeAntenna(new THREE.Vector3(x,ROOM.h-.15,-1.1),
+          new THREE.Vector3(x,1.0,-3.55), 3.4, 1.5));
+      }
+      labelGroup.add(place(makeLabel('RAK EMAS'), 0, 2.6, -3.55));
+      labelGroup.add(place(makeLabel('ANTENA RFID','#E9EBEE'), 0, 3.5, -1.1));
+      return [
+        {x:.6,z:5.0},{x:1.15,z:4.55,dwell:1.6,event:'spk'},
+        {x:0,z:4.4},{x:0,z:3.3,dwell:.3,event:'enterin'},
+        {x:-2.2,z:-2.5,dwell:1.4,event:'pick'},
+        {x:-4.25,z:0,dwell:2.2,event:'scan'},
+        {x:0,z:3.5,dwell:.6,event:'waitdoor'},{x:0,z:4.9}
+      ];
+    }
+  },
+  2: {
+    stats:'<b>Rak</b> : 15 unit (3 baris &times; 5 rak)<br><b>Antena rak</b> : 24 (2 per level &times; 4 level &times; 3 baris)<br><b>Reader</b> : 3 unit 8-port (1 per baris)<br><b>Station</b> : kiri-tengah &middot; masuk &amp; keluar via SPK',
+    note:'Antena kiri-kanan per level: zona baca terfokus per level rak, risiko cross-read antar baris kecil.',
+    build(){
+      const rows=[-3.55,-1.55,.45];
+      const origins=[];
+      rows.forEach(z=>{ for(let i=0;i<5;i++) origins.push({x:-3+i*1.5, z}); });
+      conceptGroup.add(buildRacks(origins));
+      const LVL_Y=[.36,.82,1.28,1.74];
+      const poleMat=new THREE.MeshStandardMaterial({color:C.rackDark,roughness:.55,metalness:.3});
+      rows.forEach(z=>{
+        for(const sx of [-1,1]){
+          const px=sx*4.05;
+          const pole=new THREE.Mesh(new THREE.BoxGeometry(.05,1.95,.05),poleMat);
+          pole.position.set(px,.975,z); conceptGroup.add(pole);
+          LVL_Y.forEach(y=>{
+            conceptGroup.add(makeAntenna(new THREE.Vector3(px,y,z),
+              new THREE.Vector3(-sx*4.05,y,z), 8.0, .3, .09));
+          });
+        }
+      });
+      labelGroup.add(place(makeLabel('RAK EMAS'), 0, 2.6, -1.55));
+      labelGroup.add(place(makeLabel('ANTENA PER LEVEL','#E9EBEE'), -4.05, 2.35, .45));
+      return [
+        {x:.6,z:5.0},{x:1.15,z:4.55,dwell:1.6,event:'spk'},
+        {x:0,z:4.4},{x:0,z:3.3,dwell:.3,event:'enterin'},
+        {x:2.0,z:1.6},{x:4.5,z:1.0},{x:4.5,z:-.55},
+        {x:-.5,z:-.55,dwell:1.4,event:'pick'},
+        {x:-4.25,z:-.55},{x:-4.25,z:0,dwell:2.2,event:'scan'},
+        {x:-4.25,z:1.4},{x:-1.5,z:2.4},{x:0,z:3.5,dwell:.6,event:'waitdoor'},{x:0,z:4.9}
+      ];
+    }
+  }
+};
+function place(sp,x,y,z){ sp.position.set(x,y,z); return sp; }
+
+/* ================= simulation state ================= */
+let simPlaying=false, simTime=0, simFinished=false;
+const $=id=>document.getElementById(id);
+const flowEl=$('flow');
+const FLOW_TEXT={
+  walk:'Petugas bergerak &mdash; <b>mengikuti jalur</b>',
+  spk:'Scan SPK di panel masuk &mdash; <b>validasi surat perintah kerja</b>',
+  enterin:'SPK valid &mdash; <b>petugas masuk, pintu menutup otomatis</b>',
+  pick:'Mengambil emas sesuai SPK &mdash; <b>tag RFID ikut terbawa</b>',
+  scan:'Verifikasi di RFID Station &mdash; <b>mencocokkan tag vs SPK</b>',
+  waitdoor:'Semua tag sesuai &mdash; <b>pintu terbuka, petugas keluar</b>',
+  idle:'Petugas keluar &mdash; <b>pintu terkunci kembali</b>'
+};
+const READY_TEXT='Siap &mdash; tekan <b>&#9654; Play</b> untuk memulai simulasi';
+const DONE_TEXT ='Simulasi selesai &mdash; tekan <b>&#9654; Play</b> untuk mengulang';
+let lastFlow='';
+
+function setFlow(html){ if(html!==lastFlow){ flowEl.innerHTML=html; lastFlow=html; } }
+function setSimUI(){
+  $('btnPlay').disabled = simPlaying;
+  $('btnStop').disabled = !simPlaying;
+}
+function resetSimVisuals(){
+  if(!timeline || !officer) return;
+  officer.position.set(timeline.start.x, 0, timeline.start.z);
+  officer.rotation.y = Math.PI;
+  goldInHand.visible=false;
+  door.open=0; door.panel.position.x=0;
+  door.lamp.material.color.setHex(C.alert);
+  door.lamp.material.emissive.setHex(C.alert);
+  station.pulse.material.opacity=0;
+}
+function playSim(){
+  simTime=0; simFinished=false; simPlaying=true;
+  setSimUI(); setFlow(FLOW_TEXT.walk);
+}
+function stopSim(finished){
+  simPlaying=false; simTime=0; simFinished=!!finished;
+  resetSimVisuals(); setSimUI();
+  setFlow(simFinished ? DONE_TEXT : READY_TEXT);
+}
+$('btnPlay').addEventListener('click', playSim);
+$('btnStop').addEventListener('click', ()=>stopSim(false));
+
+/* ================= build / switch ================= */
+function build(c){
+  disposeGroup(conceptGroup); disposeGroup(labelGroup); disposeGroup(coverGroup);
+  disposeGroup(pathLine); disposeGroup(officer);
+  conceptGroup=new THREE.Group(); labelGroup=new THREE.Group(); coverGroup=new THREE.Group();
+  scene.add(conceptGroup, labelGroup, coverGroup);
+
+  conceptGroup.add(makeStation(-4.9, 0, Math.PI/2));
+  conceptGroup.add(makeDoor());
+  labelGroup.add(place(makeLabel('RFID STATION','#3ED0C2'), -4.6, 1.9, 0));
+  labelGroup.add(place(makeLabel('PINTU','#E8EAF2'), 0, 2.8, 4.0));
+  labelGroup.add(place(makeLabel('SCAN SPK','#3ED0C2'), 1.9, 1.7, 4.35));
+
+  const wps = CONCEPTS[c].build();
+  timeline = buildTimeline(wps);
+  pathLine = makePath(wps.map(p=>[p.x,p.z])); scene.add(pathLine);
+  officer = makeOfficer(); scene.add(officer);
+
+  $('stats').innerHTML = CONCEPTS[c].stats + '<br><b>Ruangan</b> : 12 &times; 8 &times; 3.2 m';
+  $('note').innerHTML = CONCEPTS[c].note;
+
+  applyTheme(document.body.classList.contains('dark') ? 'dark' : 'light');
+  stopSim(false);          // switching concepts: stop + reset, wait for Play
+  syncToggles();
+}
+
+/* ================= UI wiring ================= */
+$('segConcept').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  [...$('segConcept').children].forEach(x=>x.classList.toggle('on',x===b));
+  build(+b.dataset.c);
+});
+$('segView').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  [...$('segView').children].forEach(x=>x.classList.toggle('on',x===b));
+  orbit.topView = b.dataset.v==='top';
+  orbit.r = orbit.topView ? 15.5 : 16.5;
+  applyCam();
+});
+$('themeSeg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  [...$('themeSeg').children].forEach(x=>x.classList.toggle('on',x===b));
+  applyTheme(b.dataset.t);
+});
+function syncToggles(){
+  coverGroup.visible = $('ckCov').checked;
+  const p = $('ckPath').checked;
+  pathLine.visible = p; officer.visible = p;
+  labelGroup.visible = $('ckLabel').checked;
+}
+['ckCov','ckPath','ckLabel'].forEach(id=>$(id).addEventListener('change',syncToggles));
+
+/* ================= animation loop ================= */
+const clock=new THREE.Clock();
+let tGlobal=0;
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), .1);
+  tGlobal += dt;
+
+  if(timeline && officer){
+    if(simPlaying){
+      simTime += dt;
+      if(simTime >= timeline.total){ stopSim(true); }
+    }
+
+    if(simPlaying){
+      const ct = simTime;
+      let seg = timeline.segs.find(s=>ct>=s.t0 && ct<s.t1) || timeline.segs[timeline.segs.length-1];
+      let px, pz, mode=seg.type;
+      if(seg.type==='walk'){
+        const k=(ct-seg.t0)/(seg.t1-seg.t0);
+        px=seg.a.x+(seg.b.x-seg.a.x)*k; pz=seg.a.z+(seg.b.z-seg.a.z)*k;
+        officer.rotation.y=Math.atan2(seg.b.x-seg.a.x, seg.b.z-seg.a.z);
+      }else{ px=seg.a.x; pz=seg.a.z; if(seg.ev) mode=seg.ev; }
+      officer.position.set(px,0,pz);
+
+      const pk=timeline.win.pick;
+      goldInHand.visible = pk && ct>pk[1]-0.05 && seg.type!=='idle';
+
+      const sc=timeline.win.scan;
+      const scanning = sc && ct>=sc[0] && ct<sc[1];
+      if(scanning){
+        const k=((ct-sc[0])%.8)/.8;
+        station.pulse.scale.setScalar(.4+k*3.2);
+        station.pulse.material.opacity=.5*(1-k);
+        station.ring.material.opacity=.65;
+      }else{
+        station.pulse.material.opacity=0;
+      }
+
+      const spk=timeline.win.spk, ein=timeline.win.enterin, sc2=timeline.win.scan;
+      const entryOpen = spk && ein && ct>spk[1]-.2 && ct<ein[1]+.25;
+      const exitOpen  = sc2 && ct>sc2[1]-.2 && seg.type!=='idle';
+      const openTarget = (entryOpen || exitOpen) ? 1 : 0;
+      door.open += (openTarget-door.open)*.12;
+      door.panel.position.x = -door.open*1.55;
+      const lampC = door.open>.5 ? C.ok : C.alert;
+      door.lamp.material.color.setHex(lampC);
+      door.lamp.material.emissive.setHex(lampC);
+
+      const key = FLOW_TEXT[mode] ? mode : 'walk';
+      setFlow(FLOW_TEXT[key]);
+    }else{
+      // idle scene: gentle breathing on the reading ring
+      station.ring.material.opacity=.32+.08*Math.sin(tGlobal*2);
+      if(door.open>0.001){
+        door.open += (0-door.open)*.12;
+        door.panel.position.x = -door.open*1.55;
+      }
+    }
+  }
+  renderer.render(scene,camera);
+}
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+applyTheme('dark');   // default Dark Mode (body.dark set in HTML to avoid light flash)
+build(1);
+animate();
+})();
+</script>
+</body>
+</html>
