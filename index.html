@@ -321,7 +321,9 @@ let curC=1, curS='ok';
 function disposeGroup(g){
   if(!g) return;
   g.traverse(o=>{
-    if(o.geometry && ![postGeo,shelfGeo,barGeo].includes(o.geometry)) o.geometry.dispose();
+    // JANGAN buang geometry sprite: three r128 memakai satu BufferGeometry bersama
+    // untuk SEMUA sprite, jadi membuangnya merusak label yang dibuat sesudahnya.
+    if(o.geometry && !o.isSprite && ![postGeo,shelfGeo,barGeo].includes(o.geometry)) o.geometry.dispose();
     if(o.material && ![rackMat,deckMat,goldMat].includes(o.material)){
       (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{ if(m.map)m.map.dispose(); m.dispose(); });
     }
@@ -526,7 +528,7 @@ const CONCEPTS = {
           new THREE.Vector3(x,1.0,-3.55), 3.4, 1.5));
       }
       labelGroup.add(place(makeLabel('RAK EMAS'), 0, 2.6, -3.55));
-      labelGroup.add(place(makeLabel('ANTENA RFID','#E9EBEE'), 0, 3.5, -1.1));
+      labelGroup.add(place(makeLabel('ANTENA RFID','#E9EBEE'), 3.2, 3.5, -1.1));   // digeser, tadinya menumpuk RAK EMAS
       return [
         {x:.6,z:5.0},{x:1.15,z:4.55,dwell:1.6,event:'spk'},
         {x:0,z:4.4},{x:0,z:3.3,dwell:.3,event:'enterin'},
@@ -668,7 +670,7 @@ function build(c, s){
   conceptGroup.add(makeStation(-4.9, 0, Math.PI/2));
   conceptGroup.add(makeDoor());
   conceptGroup.add(makeGate());
-  labelGroup.add(place(makeLabel('RFID GATE','#E9EBEE'), -1.95, 2.05, GATE_Z));
+  labelGroup.add(place(makeLabel('RFID GATE','#E9EBEE'), -2.7, 1.45, GATE_Z));   // rendah & ke kiri, menjauh dari label PINTU
   labelGroup.add(place(makeLabel('RFID STATION','#3ED0C2'), -4.6, 1.9, 0));
   labelGroup.add(place(makeLabel('PINTU','#E8EAF2'), 0, 2.8, 4.0));
   labelGroup.add(place(makeLabel('SCAN SPK','#3ED0C2'), 1.9, 1.7, 4.35));
