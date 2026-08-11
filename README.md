@@ -80,8 +80,31 @@ tanpa server. Isinya objek biasa — pengalaman editnya sama.
 | Ganti skenario | dropdown di panel kiri (muncul kalau > 1 skenario) |
 | Jalankan | **▶ Play** / **■ Stop** |
 | Mode pameran | centang **Ulang otomatis** — animasi loop terus |
+| Unduh video | **⬤ Rekam video 1080p** |
 
 Checkbox lain: zona baca RFID, jalur & pelaku, label ruangan.
+
+## Rekam video
+
+Tombol **Rekam video 1080p** merekam satu putaran penuh animasi yang sedang aktif,
+memakai sudut kamera dan skenario yang sedang dipilih, lalu file-nya langsung terunduh.
+
+- Selalu 1920×1080 apa pun ukuran jendela. Selama merekam, preview di-letterbox
+  16:9 supaya yang kamu lihat persis yang direkam.
+- MP4 (H.264) kalau browser mendukung, kalau tidak jatuh ke WebM. Chrome dan Edge
+  memberi MP4; Firefox biasanya WebM.
+- ~12 Mbps di 1080p30.
+- Caption status dan identitas "Stechoq 3D" di-**burn in** ke video. Ini perlu karena
+  `captureStream()` hanya merekam canvas, bukan overlay HTML — tanpa komposit ini
+  videonya cuma 3D tanpa penjelasan apa pun.
+- `Ulang otomatis` diabaikan saat merekam; selalu tepat satu putaran.
+- Klik tombolnya lagi untuk menghentikan lebih awal.
+
+Perekamannya real-time, jadi kalau frame rate drop videonya ikut tersendat. Tutup tab
+lain kalau hasilnya kurang mulus. Tidak ada audio.
+
+Butuh `MediaRecorder` — kalau browsernya tidak mendukung, status bar memberi tahu dan
+tidak ada yang berubah.
 
 ## Struktur
 
@@ -138,6 +161,11 @@ baca), `S.makeScreen()` (layar canvas yang bisa digambar ulang), `S.addLabel()`,
   dibuat sesudahnya. `disposeGroup()` sudah melewati sprite.
 - **`applyTheme()` butuh ruangan sudah ada** — dipanggil dari dalam `rebuild()`,
   jangan sebelum `buildRoom()`.
+- **`drawImage()` dari canvas WebGL harus di tick rAF yang sama dengan `render()`.**
+  Setelah browser mengomposit frame, drawing buffer WebGL sudah kosong dan hasilnya
+  hitam. Inilah kenapa `drawRecFrame()` dipanggil tepat setelah `renderer.render()`
+  dan bukan dari timer terpisah — dan kenapa `preserveDrawingBuffer` tidak perlu
+  dinyalakan.
 
 ## Pemeriksaan
 

@@ -449,6 +449,7 @@ $('btnPlay').addEventListener('click', playSim);
 $('btnStop').addEventListener('click', ()=>stopSim(false));
 ['ckCov','ckPath','ckLabel'].forEach(id=>$(id).addEventListener('change',syncToggles));
 addEventListener('resize',()=>{
+  if(REC.on) return;               // saat merekam ukuran render dipatok 1080p
   camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);
 });
@@ -471,8 +472,12 @@ function animate(){
     if(simPlaying){
       simTime+=dt;
       if(simTime>=timeline.total){
-        if($('ckLoop').checked){ simTime=0; if(S.cur.reset) S.cur.reset(); }
+        if(REC.on) stopRec();                 // rekam tepat satu putaran, abaikan loop
+        else if($('ckLoop').checked){ simTime=0; if(S.cur.reset) S.cur.reset(); }
         else stopSim(true);
+      }else if(REC.on){
+        const p=Math.round(simTime/timeline.total*100);
+        if(p!==REC.pct){ REC.pct=p; updateRecUI(p); }
       }
     }
 
@@ -505,7 +510,156 @@ function animate(){
     }
   }
   renderer.render(scene,camera);
+  if(REC.on) drawRecFrame();     // harus di tick yang sama: buffer WebGL masih utuh
 }
+
+/* ================= rekam video =================
+   captureStream() hanya merekam canvas, bukan overlay DOM, jadi frame WebGL
+   dikomposit ke canvas 2D bersama caption lalu canvas itulah yang direkam.
+   drawImage() dipanggil di tick rAF yang sama dengan render() — setelah frame
+   dikomposit browser, drawing buffer WebGL sudah kosong dan hasilnya hitam. */
+const REC={on:false}, REC_W=1920, REC_H=1080, REC_FPS=30;
+
+function pickMime(){
+  if(!window.MediaRecorder) return null;
+  const list=[
+    ['video/mp4;codecs=avc1.640028','mp4'], ['video/mp4','mp4'],
+    ['video/webm;codecs=vp9','webm'], ['video/webm;codecs=vp8','webm'], ['video/webm','webm']
+  ];
+  for(const [mime,ext] of list) if(MediaRecorder.isTypeSupported(mime)) return {mime,ext};
+  return null;
+}
+
+function stamp(){
+  const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return ''+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes());
+}
+
+function drawRecFrame(){
+  const cx=REC.cctx, W=REC_W, H=REC_H;
+  cx.drawImage(renderer.domElement,0,0,W,H);
+
+  /* caption bawah — teks polos diambil dari status bar */
+  const g=cx.createLinearGradient(0,H-200,0,H);
+  g.addColorStop(0,'rgba(6,9,18,0)'); g.addColorStop(1,'rgba(6,9,18,.85)');
+  cx.fillStyle=g; cx.fillRect(0,H-200,W,200);
+  const txt=flowEl.textContent||'';
+  cx.textAlign='center'; cx.textBaseline='middle';
+  let size=46;
+  cx.font='600 '+size+'px "Segoe UI",sans-serif';
+  while(cx.measureText(txt).width>W-160 && size>22){
+    size-=2; cx.font='600 '+size+'px "Segoe UI",sans-serif';
+  }
+  cx.fillStyle=flowEl.classList.contains('bad') ? '#FF6B6E' : '#F2F4F8';
+  cx.fillText(txt,W/2,H-80);
+
+  /* identitas kiri atas */
+  cx.textAlign='left';
+  cx.font='700 42px "Segoe UI",sans-serif';
+  const w1=cx.measureText('Stechoq 3D').width;
+  cx.font='500 27px "Segoe UI",sans-serif';
+  const bw=Math.max(w1,cx.measureText(REC.subtitle).width)+56;
+  cx.fillStyle='rgba(6,9,18,.58)';
+  if(cx.roundRect){ cx.beginPath(); cx.roundRect(48,44,bw,116,16); cx.fill(); }
+  else cx.fillRect(48,44,bw,116);
+  cx.font='700 42px "Segoe UI",sans-serif';
+  cx.fillStyle='#F2F4F8'; cx.fillText('Stechoq ',76,86);
+  cx.fillStyle='#DFB63C'; cx.fillText('3D',76+cx.measureText('Stechoq ').width,86);
+  cx.font='500 27px "Segoe UI",sans-serif';
+  cx.fillStyle='#B8C0D0'; cx.fillText(REC.subtitle,76,132);
+}
+
+function recSubtitle(){
+  const parts=[$('panelTitle').textContent];
+  const segOn=$('segVariant').querySelector('.on');
+  if(segOn) parts.push(segOn.textContent);
+  const sel=$('selScen');
+  if(sel.selectedIndex>=0 && sel.options.length) parts.push(sel.options[sel.selectedIndex].text);
+  return parts.join('  ·  ');
+}
+
+function updateRecUI(pct){
+  const b=$('btnRec');
+  b.classList.toggle('on',REC.on);
+  b.innerHTML = REC.on ? '&#9632;&nbsp;Merekam… '+(pct||0)+'%'
+                       : '&#11044;&nbsp;Rekam video 1080p';
+  ['selAnim','selScen','ckLoop'].forEach(id=>{ const e=$(id); if(e) e.disabled=REC.on; });
+  [...$('segVariant').children].forEach(x=>x.disabled=REC.on);
+  if(REC.on){ $('btnPlay').disabled=true; $('btnStop').disabled=true; }
+  else setSimUI();
+}
+
+function startRec(){
+  if(!timeline){ setFlow('Belum ada animasi untuk direkam'); return; }
+  const pick=pickMime();
+  if(!pick){ setFlow('Browser ini tidak mendukung perekaman &mdash; coba Chrome atau Edge', true); return; }
+
+  REC.cap=document.createElement('canvas');
+  REC.cap.width=REC_W; REC.cap.height=REC_H;
+  REC.cctx=REC.cap.getContext('2d');
+  REC.subtitle=recSubtitle();
+  REC.ext=pick.ext; REC.chunks=[]; REC.pct=-1;
+
+  /* recorder dibuat SEBELUM renderer diubah — kalau gagal, tidak ada yang
+     perlu dipulihkan dan app tidak tertinggal di ukuran rekaman */
+  try{
+    REC.mr=new MediaRecorder(REC.cap.captureStream(REC_FPS),{
+      mimeType:pick.mime,
+      videoBitsPerSecond:Math.min(40e6, Math.round(REC_W*REC_H*REC_FPS*.2))   // ~12 Mbps di 1080p30
+    });
+  }catch(e){
+    setFlow('Perekaman tidak bisa dimulai: '+e.message, true); return;
+  }
+  REC.mr.ondataavailable=e=>{ if(e.data && e.data.size) REC.chunks.push(e.data); };
+  REC.mr.onstop=finishRec;
+
+  /* render 1080p penuh apa pun ukuran jendela; preview di-letterbox
+     supaya yang terlihat sama dengan yang direkam */
+  REC.savedPR=renderer.getPixelRatio();
+  REC.savedAspect=camera.aspect;
+  renderer.setPixelRatio(1);
+  renderer.setSize(REC_W,REC_H,false);
+  camera.aspect=REC_W/REC_H; camera.updateProjectionMatrix();
+  const el=renderer.domElement, s=Math.min(innerWidth/REC_W,innerHeight/REC_H);
+  el.style.position='absolute'; el.style.left='50%'; el.style.top='50%';
+  el.style.transform='translate(-50%,-50%)';
+  el.style.width=(REC_W*s)+'px'; el.style.height=(REC_H*s)+'px';
+
+  REC.on=true;
+  REC.mr.start(1000);
+  stopSim(false); playSim();          // rekam tepat satu putaran penuh dari awal
+  updateRecUI(0);
+}
+
+function stopRec(){
+  if(!REC.on) return;
+  REC.on=false;
+  stopSim(true);
+  try{ REC.mr.stop(); }catch(e){ setFlow('Perekaman gagal ditutup: '+e.message, true); }
+
+  renderer.setPixelRatio(REC.savedPR);
+  camera.aspect=REC.savedAspect; camera.updateProjectionMatrix();
+  const el=renderer.domElement;
+  el.style.position=''; el.style.left=''; el.style.top=''; el.style.transform='';
+  renderer.setSize(innerWidth,innerHeight);
+  applyCam();
+  updateRecUI();
+}
+
+function finishRec(){
+  if(!REC.chunks.length){ setFlow('Perekaman kosong &mdash; tidak ada frame tertangkap', true); return; }
+  const blob=new Blob(REC.chunks,{type:REC.chunks[0].type||'video/webm'});
+  const name='stechoq3d-'+(S.cur?S.cur.id:'sim')+'-'+stamp()+'.'+REC.ext;
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),15000);
+  REC.chunks=[];
+  const mb=(blob.size/1048576).toFixed(1);
+  setFlow('Video tersimpan &mdash; <b>'+name+'</b> ('+mb+' MB)');
+}
+
+$('btnRec').addEventListener('click',()=>REC.on?stopRec():startRec());
 
 /* ================= boot ================= */
 S.boot = function(){
