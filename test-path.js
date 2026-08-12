@@ -7,6 +7,7 @@ const read = f => fs.readFileSync(__dirname + '/' + f, 'utf8');
 const coreSrc = read('js/core.js');
 const vaultSrc = read('js/anim-vault.js');
 const whSrc = read('js/anim-warehouse.js');
+const injSrc = read('js/anim-injection.js');
 const cfgSrc = read('animations.js');
 
 function slice(src, from, to, what){
@@ -36,7 +37,7 @@ const buildTimeline = new Function(
    1. animations.js — setiap id harus benar-benar terdaftar
    ============================================================ */
 const cfg = new Function('const window={};' + cfgSrc + 'return window.SIMLAY_CONFIG;')();
-const registered = [coreSrc, vaultSrc, whSrc]
+const registered = [coreSrc, vaultSrc, whSrc, injSrc]
   .flatMap(s => [...s.matchAll(/S\.register\(\s*'([^']+)'/g)].map(m => m[1]));
 assert.ok(cfg && Array.isArray(cfg.show), 'animations.js harus mengekspor show[]');
 assert.ok(cfg.show.length > 0, 'animations.js: show[] kosong, tidak ada yang tampil');
@@ -206,5 +207,114 @@ for(const [name, wps] of Object.entries(WPS)){
   }
 }
 
-console.log('OK — konfigurasi, vault (2 skenario x 2 konsep), dan gudang ('
-  + Object.keys(WPS).length + ' arah alur) lolos semua pemeriksaan');
+/* ============================================================
+   4. Injection — sinkronisasi mesin, robot, dan operator
+   ============================================================ */
+/* urutan penting: MACH_TOP butuh PLATEN_*, PICK_X butuh PLATEN_OPEN + PART_OFF */
+const INJ_NAMES = ['PLATEN_W','PLATEN_Y','PLATEN_H','MACH_TOP','FIX_X','END_X','PART_W','PART_H',
+  'PLATEN_CLOSED','PLATEN_OPEN','MOLD_T','MOLD_FIX_X','MOLD_MOVE_OFF','PART_OFF',
+  'RAIL_Y','ARM_MIN','EFF_DROP','HOME_X','PICK_X','DROP_X','CHUTE_TOP','CHUTE_BOT',
+  'SHOTS','MACH_T','CHECK_T','STORE_T','PRINT_T','INJECT_END','COOL_END','OPEN_END',
+  'GRIP_AT','RELEASE_AT','LAND_AT','STORE_AT','OP','RK'];
+const inj = new Function(consts(injSrc, INJ_NAMES) + '\n' +
+  slice(injSrc, 'function buildWps(){', '\n/* ================= registrasi', 'injection') +
+  '\nreturn {' + INJ_NAMES.join(',') + ',buildWps};')();
+
+/* urutan fase harus masuk akal secara fisik */
+assert.ok(inj.INJECT_END < inj.COOL_END, 'injection: pendinginan sebelum injeksi selesai');
+assert.ok(inj.COOL_END < inj.OPEN_END, 'injection: mold terbuka sebelum pendinginan selesai');
+assert.ok(inj.OPEN_END < inj.GRIP_AT, 'injection: robot menjepit sebelum mold terbuka');
+assert.ok(inj.GRIP_AT < inj.RELEASE_AT, 'injection: part dilepas sebelum dijepit');
+assert.ok(inj.RELEASE_AT < inj.LAND_AT, 'injection: part sampai meja sebelum dilepas robot');
+assert.ok(inj.STORE_AT < inj.STORE_T, 'injection: part ditaruh di rak setelah dwell store habis');
+assert.ok(inj.PLATEN_OPEN > inj.PLATEN_CLOSED, 'injection: mold harus terbuka ke arah +x');
+
+/* keyframe robot: waktu naik monoton, dan berakhir kembali ke posisi parkir */
+inj.RK.forEach((k, i) => {
+  if(i) assert.ok(k[0] >= inj.RK[i-1][0], `injection: keyframe robot ${i} waktunya mundur`);
+  assert.ok(k[2] >= inj.ARM_MIN, `injection: keyframe robot ${i} arm lebih pendek dari ARM_MIN`);
+});
+const lastK = inj.RK[inj.RK.length - 1];
+assert.strictEqual(lastK[1], inj.HOME_X, 'injection: robot tidak kembali ke posisi parkir');
+assert.strictEqual(lastK[2], inj.ARM_MIN, 'injection: arm robot tidak tertarik penuh di akhir');
+assert.ok(lastK[0] >= inj.LAND_AT, 'injection: keyframe robot habis sebelum part mendarat');
+/* robot harus benar-benar berada di atas part saat menjepit, dan di seluncuran saat melepas */
+const kAt = t => { const r = inj.RK.filter(k => k[0] <= t); return r[r.length-1]; };
+assert.strictEqual(kAt(inj.GRIP_AT)[1], inj.PICK_X, 'injection: robot tidak di atas part saat GRIP_AT');
+assert.strictEqual(kAt(inj.RELEASE_AT)[1], inj.DROP_X, 'injection: robot tidak di seluncuran saat RELEASE_AT');
+
+/* ---- geometri mesin: dua paruh mold tidak boleh saling tembus saat tertutup ---- */
+const fixFace = inj.FIX_X + inj.PLATEN_W/2;                 // muka platen tetap
+const movFace = inj.PLATEN_CLOSED - inj.PLATEN_W/2;         // muka platen bergerak, tertutup
+const moldFix = [inj.MOLD_FIX_X - inj.MOLD_T/2, inj.MOLD_FIX_X + inj.MOLD_T/2];
+const moldMovC = [inj.PLATEN_CLOSED + inj.MOLD_MOVE_OFF - inj.MOLD_T/2,
+                  inj.PLATEN_CLOSED + inj.MOLD_MOVE_OFF + inj.MOLD_T/2];
+assert.ok(moldFix[1] <= moldMovC[0] + .02,
+  `injection: dua paruh mold saling tembus ${(moldFix[1]-moldMovC[0]).toFixed(3)} m saat tertutup`);
+assert.ok(moldFix[0] >= fixFace - .02, 'injection: paruh mold tetap menembus platen tetap');
+assert.ok(moldMovC[1] <= movFace + .02, 'injection: paruh mold bergerak menembus platennya sendiri');
+assert.ok(inj.PLATEN_OPEN > inj.PLATEN_CLOSED, 'injection: mold harus terbuka ke arah +x');
+assert.ok(inj.PLATEN_OPEN + inj.PLATEN_W/2 < inj.END_X - inj.PLATEN_W/2,
+  'injection: platen bergerak menabrak end plate saat terbuka');
+
+/* part harus lepas dari paruh bergerak supaya bisa diangkat lurus ke atas */
+assert.strictEqual(inj.PLATEN_OPEN + inj.PART_OFF, inj.PICK_X,
+  'injection: PICK_X tidak sama dengan posisi part saat mold terbuka');
+const moldMovOpenMin = inj.PLATEN_OPEN + inj.MOLD_MOVE_OFF - inj.MOLD_T/2;
+assert.ok(inj.PICK_X + inj.PART_W/2 <= moldMovOpenMin + .02,
+  'injection: part menembus paruh mold bergerak saat diangkat lurus ke atas');
+
+/* ---- tinggi: jepit setinggi part, lepas di atas seluncuran, geser di atas mesin ---- */
+const partY = len => inj.RAIL_Y - len - inj.EFF_DROP;
+assert.ok(Math.abs(partY(kAt(inj.GRIP_AT)[2]) - inj.PLATEN_Y) < .06,
+  `injection: robot menjepit di y=${partY(kAt(inj.GRIP_AT)[2]).toFixed(2)} tapi part di mold y=${inj.PLATEN_Y}`);
+const relY = partY(kAt(inj.RELEASE_AT)[2]);
+assert.ok(relY > inj.CHUTE_TOP[1] && relY < inj.CHUTE_TOP[1] + .6,
+  `injection: part dilepas di y=${relY.toFixed(2)}, ujung seluncuran y=${inj.CHUTE_TOP[1]}`);
+assert.ok(inj.RAIL_Y > inj.MACH_TOP, 'injection: rel robot di bawah puncak platen');
+/* geser mendatar sambil membawa part: part wajib bebas di atas puncak platen */
+inj.RK.forEach((k, i) => {
+  if(!i) return;
+  const prev = inj.RK[i-1];
+  if(prev[1] === k[1]) return;                                  // tidak bergeser mendatar
+  if(k[0] <= inj.GRIP_AT || prev[0] >= inj.RELEASE_AT) return;   // part tidak sedang dibawa
+  [prev[2], k[2]].forEach(len => assert.ok(partY(len) - inj.PART_H/2 > inj.MACH_TOP,
+    `injection: robot menggeser part di y=${partY(len).toFixed(2)}, menembus puncak platen ${inj.MACH_TOP}`));
+});
+
+/* seluncuran harus benar-benar menurun dan berakhir di atas meja */
+assert.ok(inj.CHUTE_BOT[1] < inj.CHUTE_TOP[1], 'injection: seluncuran tidak menurun');
+assert.ok(inj.CHUTE_BOT[0] > inj.CHUTE_TOP[0], 'injection: seluncuran mengarah ke belakang');
+
+/* waypoint operator tidak boleh ada dua berurutan di titik sama —
+   segmen jalan berdurasi nol membuat timeline punya t1 === t0 */
+const injWps = inj.buildWps();
+injWps.forEach((p, i) => {
+  if(!i) return;
+  const q = injWps[i-1];
+  assert.ok(Math.hypot(p.x-q.x, p.z-q.z) > .05,
+    `injection: waypoint ${i-1} dan ${i} berada di titik yang sama`);
+});
+
+const injTl = buildTimeline(injWps, 1.9);
+checkTimeline(injTl, 'injection');
+assert.ok(injTl.win.p, 'injection: tidak ada event printer');
+
+/* INTI sinkronisasi: bumper harus sudah sampai meja sebelum operator mulai memeriksa,
+   kalau tidak operator memeriksa meja kosong */
+for(let i = 0; i < inj.SHOTS; i++){
+  const mw = injTl.win['m'+i], cw = injTl.win['c'+i], sw = injTl.win['s'+i];
+  assert.ok(mw && cw && sw, `injection: shot ${i} kehilangan salah satu window m/c/s`);
+  const margin = cw[0] - (mw[0] + inj.LAND_AT);
+  assert.ok(margin >= .1,
+    `injection: shot ${i} — bumper mendarat ${(-margin).toFixed(2)} s setelah operator tiba di meja`);
+  /* part harus keluar dari tangan operator sebelum dia sampai printer */
+  assert.ok(sw[0] + inj.STORE_AT < sw[1], `injection: shot ${i} — part ditaruh setelah dwell store habis`);
+}
+/* printer baru jalan setelah rak penuh */
+assert.ok(injTl.win.p[0] > injTl.win['s'+(inj.SHOTS-1)][1] - .01,
+  'injection: printer mencetak sebelum rak penuh');
+
+console.log('OK — konfigurasi, vault (2 skenario x 2 konsep), gudang ('
+  + Object.keys(WPS).length + ' arah alur), injection (' + inj.SHOTS
+  + ' shot) lolos semua pemeriksaan');

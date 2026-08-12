@@ -38,6 +38,17 @@ untuk pameran: alurnya harus terbaca tanpa perlu dijelaskan.
 Pembacaan gate dipicu dari jarak forklift ke gate, bukan dari jeda di timeline — jadi
 berlaku untuk kedua arah dan tidak ada berhenti yang bisa disalahartikan sebagai scan.
 
+**Injection Molding · Shot Counter.** Mesin injection besar mencetak bumper mobil.
+Mold terbuka → robot takeout mengambil dari atas → dilepas ke seluncuran ber-roller di
+sisi kanan mesin → bumper turun mulus ke meja operator → dicek → disimpan ke rak.
+Setiap shot dihitung otomatis oleh panel akuisisi di depan mesin (titik data terbang ke
+TV monitoring tiap hitungan), dan begitu rak penuh 3 pcs printer di samping operator
+mencetak label sendiri. Ganti mold ikut dicatat dan tampil di TV, tapi belum
+dianimasikan.
+
+Cycle time yang ditampilkan (42.5 s) adalah angka nyata; durasi animasinya dipadatkan
+supaya satu putaran ~40 s.
+
 **Gold Vault · RFID.** Studi tata letak rak emas dan antena RFID di ruang
 12 × 8 × 3.2 m, dua konsep penempatan, plus simulasi alur petugas dari scan SPK
 sampai verifikasi keluar. Punya dua skenario:
@@ -111,8 +122,9 @@ tidak ada yang berubah.
 ```
 index.html              # shell: header, panel, legenda, status bar, CSS
 animations.js           # daftar animasi yang tampil — satu-satunya file konfigurasi
-js/core.js              # renderer, kamera, orbit, tema, label, gate, timeline, UI
+js/core.js              # renderer, kamera, orbit, tema, label, gate, timeline, UI, rekam
 js/anim-warehouse.js    # animasi gudang
+js/anim-injection.js    # animasi injection molding
 js/anim-vault.js        # animasi gold vault
 test-path.js            # pemeriksaan jalur & konfigurasi — node test-path.js
 ```
@@ -188,7 +200,13 @@ dari sumber, jadi tidak ada logika yang diduplikasi di test. Yang dijaga:
 - pallet ada di garpu saat melintas gate: `pick` harus sebelum gate, `store` harus
   sesudahnya — kalau urutannya terbalik, pembacaan tag tidak pernah terpicu
 - titik ambil/simpan pallet di luar rak, sejajar bay, dan terjangkau garpu
-- tidak ada segmen timeline berdurasi NaN atau nol
+- tidak ada segmen timeline berdurasi NaN atau nol, dan tidak ada dua waypoint
+  berurutan di titik yang sama (segmen jalan nol detik)
+- injection: dua paruh mold tidak saling tembus saat tertutup, part lepas dari paruh
+  bergerak saat diangkat, robot menjepit tepat setinggi part di mold, melepas di atas
+  ujung seluncuran, dan menggeser part di atas puncak platen
+- injection: bumper sudah mendarat di meja sebelum operator tiba memeriksa — kalau
+  tidak, operator memeriksa meja kosong
 
 ## Catatan
 

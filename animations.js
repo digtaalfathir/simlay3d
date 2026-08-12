@@ -11,11 +11,13 @@
 
    Animasi yang tersedia:
      'warehouse' — Gudang: forklift lewat RFID gate, data ke WMS
+     'injection' — Injection molding: hitung shot, robot takeout, label otomatis
      'vault'     — Gold Vault: tata letak rak & antena RFID
    ============================================================ */
 window.SIMLAY_CONFIG = {
   show: [
     'warehouse',
+    'injection',
     'vault'
   ]
 };
