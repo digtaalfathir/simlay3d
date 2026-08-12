@@ -244,14 +244,17 @@ function makeWMS(){
   g.position.set(WMS_POS[0],0,WMS_POS[2]);
   g.rotation.y=.72;                       // menghadap kamera default
   const steel=new THREE.MeshStandardMaterial({color:C.steelDark,roughness:.5,metalness:.6});
-  const pole=new THREE.Mesh(new THREE.BoxGeometry(.14,WMS_POS[1],.14),steel);
-  pole.position.y=WMS_POS[1]/2; g.add(pole);
+  // tiang berhenti di tepi bawah bezel dan berada di BELAKANG layar (z negatif),
+  // kalau tidak ia menembus layar dan tampak sebagai garis vertikal di tengah
+  const bezelY=WMS_POS[1]+1.0, poleH=bezelY-1.1;
+  const pole=new THREE.Mesh(new THREE.BoxGeometry(.14,poleH,.14),steel);
+  pole.position.set(0,poleH/2,-.08); g.add(pole);
   const foot=new THREE.Mesh(new THREE.BoxGeometry(.8,.06,.5),steel);
-  foot.position.y=.03; g.add(foot);
+  foot.position.set(0,.03,-.08); g.add(foot);
   const bezel=new THREE.Mesh(new THREE.BoxGeometry(3.6,2.2,.1),
     new THREE.MeshStandardMaterial({color:C.station,roughness:.6}));
-  bezel.position.y=WMS_POS[1]+1.0; g.add(bezel);
-  wms.mesh.position.set(0,WMS_POS[1]+1.0,.06); g.add(wms.mesh);
+  bezel.position.y=bezelY; g.add(bezel);
+  wms.mesh.position.set(0,bezelY,.06); g.add(wms.mesh);
   return g;
 }
 

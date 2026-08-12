@@ -211,11 +211,15 @@ for(const [name, wps] of Object.entries(WPS)){
    4. Injection — sinkronisasi mesin, robot, dan operator
    ============================================================ */
 /* urutan penting: MACH_TOP butuh PLATEN_*, PICK_X butuh PLATEN_OPEN + PART_OFF */
-const INJ_NAMES = ['PLATEN_W','PLATEN_Y','PLATEN_H','MACH_TOP','FIX_X','END_X','PART_W','PART_H',
+const INJ_NAMES = ['PLATEN_W','PLATEN_Y','PLATEN_H','MACH_TOP','FIX_X','END_X','BED_X1',
+  'PART_W','PART_H','PART_L',
   'PLATEN_CLOSED','PLATEN_OPEN','MOLD_T','MOLD_FIX_X','MOLD_MOVE_OFF','PART_OFF',
-  'RAIL_Y','ARM_MIN','EFF_DROP','HOME_X','PICK_X','DROP_X','CHUTE_TOP','CHUTE_BOT',
+  'RAIL_Y','RAIL_X1','ARM_MIN','EFF_DROP','HOME_X','PICK_X',
+  'CHUTE_X','CHUTE_W','CHUTE_Z0','CHUTE_Y0','CHUTE_Z1','CHUTE_Y1','CHUTE_ANG','DROP_X',
+  'TABLE_X','TABLE_Z','TABLE_W','TABLE_D','TABLE_TOP','LAND_Z','PART_REST',
+  'RACK','RACK_W','RACK_Y','PRINTER','PANEL','TV',
   'SHOTS','MACH_T','CHECK_T','STORE_T','PRINT_T','INJECT_END','COOL_END','OPEN_END',
-  'GRIP_AT','RELEASE_AT','LAND_AT','STORE_AT','OP','RK'];
+  'GRIP_AT','RELEASE_AT','LAND_AT','STORE_AT','OP','FACE_TABLE','FACE_WAIT','RK'];
 const inj = new Function(consts(injSrc, INJ_NAMES) + '\n' +
   slice(injSrc, 'function buildWps(){', '\n/* ================= registrasi', 'injection') +
   '\nreturn {' + INJ_NAMES.join(',') + ',buildWps};')();
@@ -269,8 +273,8 @@ const partY = len => inj.RAIL_Y - len - inj.EFF_DROP;
 assert.ok(Math.abs(partY(kAt(inj.GRIP_AT)[2]) - inj.PLATEN_Y) < .06,
   `injection: robot menjepit di y=${partY(kAt(inj.GRIP_AT)[2]).toFixed(2)} tapi part di mold y=${inj.PLATEN_Y}`);
 const relY = partY(kAt(inj.RELEASE_AT)[2]);
-assert.ok(relY > inj.CHUTE_TOP[1] && relY < inj.CHUTE_TOP[1] + .6,
-  `injection: part dilepas di y=${relY.toFixed(2)}, ujung seluncuran y=${inj.CHUTE_TOP[1]}`);
+assert.ok(relY > inj.CHUTE_Y0 && relY < inj.CHUTE_Y0 + .6,
+  `injection: part dilepas di y=${relY.toFixed(2)}, permukaan seluncuran y=${inj.CHUTE_Y0}`);
 assert.ok(inj.RAIL_Y > inj.MACH_TOP, 'injection: rel robot di bawah puncak platen');
 /* geser mendatar sambil membawa part: part wajib bebas di atas puncak platen */
 inj.RK.forEach((k, i) => {
@@ -282,9 +286,42 @@ inj.RK.forEach((k, i) => {
     `injection: robot menggeser part di y=${partY(len).toFixed(2)}, menembus puncak platen ${inj.MACH_TOP}`));
 });
 
-/* seluncuran harus benar-benar menurun dan berakhir di atas meja */
-assert.ok(inj.CHUTE_BOT[1] < inj.CHUTE_TOP[1], 'injection: seluncuran tidak menurun');
-assert.ok(inj.CHUTE_BOT[0] > inj.CHUTE_TOP[0], 'injection: seluncuran mengarah ke belakang');
+/* ---- seluncuran: turun ke arah DEPAN, lepas dari mesin, cukup lebar ---- */
+assert.ok(inj.CHUTE_Y1 < inj.CHUTE_Y0, 'injection: seluncuran tidak menurun');
+assert.ok(inj.CHUTE_Z1 > inj.CHUTE_Z0, 'injection: seluncuran tidak turun ke arah depan (+z)');
+assert.ok(inj.CHUTE_ANG > .1 && inj.CHUTE_ANG < .7,
+  `injection: kemiringan seluncuran ${(inj.CHUTE_ANG*180/Math.PI).toFixed(0)}° di luar batas wajar`);
+assert.strictEqual(inj.CHUTE_Z0, 0,
+  'injection: ujung atas seluncuran harus di z=0, sejajar rel robot, kalau tidak robot melepas di udara');
+assert.strictEqual(inj.DROP_X, inj.CHUTE_X, 'injection: robot melepas tidak di atas seluncuran');
+/* kaki seluncuran ada di CHUTE_W/2-0.1 dari pusat — wajib lepas dari rangka mesin */
+assert.ok(inj.CHUTE_X - (inj.CHUTE_W/2 - .1) > inj.BED_X1,
+  'injection: kaki seluncuran menembus rangka mesin');
+/* part meluncur MELEBAR, jadi lebar seluncuran/meja/rak harus menampung panjangnya */
+[['seluncuran', inj.CHUTE_W], ['meja', inj.TABLE_W], ['rak', inj.RACK_W]].forEach(([what, w]) =>
+  assert.ok(w >= inj.PART_L, `injection: ${what} (${w}) lebih sempit dari panjang part (${inj.PART_L})`));
+/* pergelangan robot wajib sudah 90° saat melepas, supaya part masuk melebar */
+assert.ok(Math.abs(kAt(inj.RELEASE_AT)[3] - Math.PI/2) < .01,
+  'injection: part dilepas tanpa diputar 90°, tidak akan pas di seluncuran');
+assert.strictEqual(inj.RK[0][3], 0, 'injection: pergelangan tidak lurus saat mulai');
+assert.strictEqual(inj.RK[inj.RK.length-1][3], 0, 'injection: pergelangan tidak kembali lurus');
+/* rel harus mencakup seluruh lintasan carriage */
+assert.ok(inj.PICK_X > inj.FIX_X && inj.DROP_X < inj.RAIL_X1 - .3,
+  'injection: lintasan carriage melewati ujung rel');
+
+/* ---- tata letak depan: rak di KANAN operator, printer di KIRI, tidak tumpang tindih ---- */
+const tableSpan = [inj.TABLE_X - inj.TABLE_W/2, inj.TABLE_X + inj.TABLE_W/2];
+const rackSpan  = [inj.RACK[0] - inj.RACK_W/2, inj.RACK[0] + inj.RACK_W/2];
+assert.ok(inj.RACK[0] > inj.TABLE_X, 'injection: rak harus di sisi +x (kanan operator yang menghadap -z)');
+assert.ok(inj.PRINTER[0] < inj.TABLE_X, 'injection: printer harus di sisi -x (kiri operator)');
+assert.ok(rackSpan[0] > tableSpan[1], 'injection: rak menabrak meja');
+assert.ok(inj.PRINTER[0] + .35 < tableSpan[0], 'injection: printer menabrak meja');
+/* operator menunggu & bekerja di DEPAN meja, bukan di belakangnya */
+['wait','table','rack','print'].forEach(k =>
+  assert.ok(inj.OP[k][1] > inj.TABLE_Z, `injection: posisi operator '${k}' tidak di depan meja`));
+/* bumper mendarat di atas meja, bukan di luar tepinya */
+assert.ok(inj.LAND_Z > inj.CHUTE_Z1 && inj.LAND_Z < inj.TABLE_Z + inj.TABLE_D/2,
+  `injection: LAND_Z=${inj.LAND_Z} tidak berada di atas meja`);
 
 /* waypoint operator tidak boleh ada dua berurutan di titik sama —
    segmen jalan berdurasi nol membuat timeline punya t1 === t0 */

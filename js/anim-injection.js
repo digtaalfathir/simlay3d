@@ -24,8 +24,10 @@ const PLATEN_H=3.2;
 const MACH_TOP=PLATEN_Y+PLATEN_H/2; // 3.7 — puncak platen, batas bawah lintasan robot
 const FIX_X=-5.6;                   // platen tetap
 const END_X=0.6;                    // end plate
-const PART_W=0.30;                  // dimensi bumper (sumbu panjang di z)
+const BED_X1=0.8;                   // ujung +x rangka mesin
+const PART_W=0.30;                  // tebal bumper
 const PART_H=0.42;
+const PART_L=2.6;                   // panjang bumper — penentu lebar seluncuran, meja, rak
 const PLATEN_CLOSED=-3.2;
 const PLATEN_OPEN=-1.4;
 const MOLD_T=0.92;                  // tebal satu paruh mold
@@ -33,21 +35,38 @@ const MOLD_FIX_X=-4.865;            // pusat paruh tetap
 const MOLD_MOVE_OFF=-0.745;         // pusat paruh bergerak, relatif platen
 const PART_OFF=-1.355;              // part menempel di muka paruh bergerak
 const RAIL_Y=5.4;                   // rel robot, di atas MACH_TOP
+const RAIL_X1=3.0;                  // ujung rel; menjorok di luar mesin seperti gantry asli
 const ARM_MIN=0.70;                 // panjang arm tertarik
 const EFF_DROP=0.42;                // jarak part di bawah effector
 const HOME_X=-1.0;                  // parkir robot
-const PICK_X=PLATEN_OPEN+PART_OFF;  // -3.25, tepat di atas part saat mold terbuka
-const DROP_X=1.5;                   // lepas ke ujung atas seluncuran
-const CHUTE_TOP=[1.5,2.55];         // [x,y] ujung atas seluncuran
-const CHUTE_BOT=[5.5,1.15];
-const TABLE=[6.6,0];                // [x,z]
+const PICK_X=PLATEN_OPEN+PART_OFF;  // tepat di atas part saat mold terbuka
+
+/* Seluncuran turun ke arah DEPAN (+z), bukan ke kanan. Ujung atasnya harus di z=0
+   karena rel robot ada di z=0, dan sisi -x-nya harus lepas dari rangka mesin
+   supaya kaki seluncuran tidak menembus bed. */
+const CHUTE_X=2.4;                  // pusat seluncuran pada sumbu x
+const CHUTE_W=PART_L+.2;            // bumper meluncur melebar, jadi lebar = panjang part
+const CHUTE_Z0=0;                   // ujung atas, tempat robot melepas
+const CHUTE_Y0=2.55;
+const CHUTE_Z1=3.6;                 // ujung bawah, di depan
+const CHUTE_Y1=1.15;
+const CHUTE_ANG=Math.atan2(CHUTE_Y0-CHUTE_Y1, CHUTE_Z1-CHUTE_Z0);
+const DROP_X=CHUTE_X;               // robot melepas tepat di atas seluncuran
+
+const TABLE_X=CHUTE_X;              // meja di ujung bawah seluncuran
+const TABLE_Z=4.5;
+const TABLE_W=PART_L+.3;
+const TABLE_D=1.3;
 const TABLE_TOP=1.02;
-const LAND=[6.2,TABLE_TOP];         // tempat bumper berhenti di meja
-const RACK=[8.8,-1.9];
+const LAND_Z=4.3;                   // bumper berhenti di atas meja
+const PART_REST=PART_H/2;           // pusat part di atas permukaan
+
+const RACK=[5.8,4.6];               // rak di sisi KANAN operator (operator menghadap -z)
+const RACK_W=PART_L+.2;
 const RACK_Y=[.62,1.24,1.86];
-const PRINTER=[6.4,1.9];
-const PANEL=[-2.0,1.8,1.7];         // panel akuisisi di depan mesin
-const TV=[2.6,0,-3.9];
+const PRINTER=[0.4,4.7];            // printer di sisi KIRI operator, jauh dari rak
+const PANEL=[-2.0,1.8,1.7];         // IoT node di depan mesin
+const TV=[6.4,0,-0.5];
 const SHOTS=3;                      // rak penuh setelah 3 pcs
 
 /* ---- durasi (detik) ---- */
@@ -65,24 +84,30 @@ const STORE_AT=.6;                  // part diletakkan di rak (dalam dwell store
 const CYCLE_NOMINAL='42.5';         // cycle time nyata; animasi dipadatkan
 
 /* posisi berdiri operator */
-const OP={ wait:[6.2,2.0], table:[6.6,.7], rack:[8.2,-1.3], print:[5.5,2.0] };
+/* Operator menunggu di DEPAN, dekat ujung seluncuran. Menghadap -z, jadi
+   kanannya = +x (rak) dan kirinya = -x (printer). */
+const OP={ wait:[4.4,5.3], table:[TABLE_X,5.5], rack:[RACK[0],5.6], print:[PRINTER[0],5.6] };
+const FACE_TABLE=Math.PI;           // menghadap -z
+const FACE_WAIT=Math.atan2(CHUTE_X-4.4, CHUTE_Z1-5.3);   // menengok ke ujung seluncuran
 
-/* keyframe robot: [el, x carriage, panjang arm]
+/* keyframe robot: [el, x carriage, panjang arm, rotasi pergelangan]
    effector = RAIL_Y - armLen, part = effector - EFF_DROP.
    armLen 2.88 → part di y 2.10 (setinggi part di mold)
-   armLen 2.23 → part di y 2.75 (di atas ujung seluncuran 2.55)
-   armLen 0.90 → part di y 3.98, lewat di atas puncak platen (3.7) saat menggeser */
+   armLen 2.18 → part di y 2.80 (di atas permukaan seluncuran 2.55)
+   armLen 0.90 → part di y 3.98, lewat di atas puncak platen (3.7) saat menggeser
+   Pergelangan memutar part 90° saat menggeser: keluar dari mold memanjang di z,
+   masuk seluncuran melebar di x. */
 const RK=[
-  [0.0, HOME_X, ARM_MIN],
-  [2.1, HOME_X, ARM_MIN],
-  [2.7, PICK_X, 1.00],
-  [3.4, PICK_X, 2.88],
-  [3.5, PICK_X, 2.88],
-  [4.0, PICK_X, 0.90],
-  [4.6, DROP_X, 0.90],
-  [4.9, DROP_X, 2.23],
-  [5.3, DROP_X, 0.90],
-  [6.2, HOME_X, ARM_MIN]
+  [0.0, HOME_X, ARM_MIN, 0],
+  [2.1, HOME_X, ARM_MIN, 0],
+  [2.7, PICK_X, 1.00, 0],
+  [3.4, PICK_X, 2.88, 0],
+  [3.5, PICK_X, 2.88, 0],
+  [4.0, PICK_X, 0.90, 0],
+  [4.6, DROP_X, 0.90, Math.PI/2],
+  [4.9, DROP_X, 2.18, Math.PI/2],
+  [5.3, DROP_X, 0.90, Math.PI/2],
+  [6.2, HOME_X, ARM_MIN, 0]
 ];
 
 /* resource yang dipakai ulang antar build */
@@ -111,6 +136,15 @@ function makeBumper(){
   const grill=new THREE.Mesh(new THREE.BoxGeometry(.06,.14,.90),grillMat);
   grill.position.set(.16,-.07,0); g.add(grill);
   return g;
+}
+
+/* Bungkus supaya part melebar (sumbu panjang di x). Rotasi y dipasang di
+   ANAK, jadi rotation.x pada grup luar memiringkannya tanpa tercampur
+   urutan Euler. */
+function makeBumperWide(){
+  const outer=new THREE.Group();
+  const b=makeBumper(); b.rotation.y=Math.PI/2; outer.add(b);
+  return outer;
 }
 
 /* ================= mesin injection ================= */
@@ -190,8 +224,9 @@ function makePanel(){
 function makeRobot(){
   const g=new THREE.Group();
   // rel menumpu di atas platen tetap (-5.6) dan end plate (0.6), keduanya puncak 3.7
-  const rail=new THREE.Mesh(new THREE.BoxGeometry(8.7,.20,.24),steelMat);
-  rail.position.set(-1.25,RAIL_Y,0); g.add(rail);
+  const railLen=RAIL_X1-FIX_X;
+  const rail=new THREE.Mesh(new THREE.BoxGeometry(railLen,.20,.24),steelMat);
+  rail.position.set((FIX_X+RAIL_X1)/2,RAIL_Y,0); g.add(rail);
   for(const x of [FIX_X,END_X]){
     const post=new THREE.Mesh(new THREE.BoxGeometry(.16,RAIL_Y-MACH_TOP,.16),steelMat);
     post.position.set(x,MACH_TOP+(RAIL_Y-MACH_TOP)/2,0); g.add(post);
@@ -227,63 +262,72 @@ function setArm(len){
 /* ================= seluncuran ================= */
 function makeChute(){
   const g=new THREE.Group();
-  const dx=CHUTE_BOT[0]-CHUTE_TOP[0], dy=CHUTE_BOT[1]-CHUTE_TOP[1];
-  const len=Math.hypot(dx,dy), ang=Math.atan2(dy,dx);
-  const mid=[(CHUTE_TOP[0]+CHUTE_BOT[0])/2,(CHUTE_TOP[1]+CHUTE_BOT[1])/2];
+  const dz=CHUTE_Z1-CHUTE_Z0, dy=CHUTE_Y1-CHUTE_Y0;
+  const len=Math.hypot(dz,dy);
+  const midZ=(CHUTE_Z0+CHUTE_Z1)/2, midY=(CHUTE_Y0+CHUTE_Y1)/2;
+  const yAt=t=>CHUTE_Y0+dy*t;
 
-  const deck=new THREE.Mesh(new THREE.BoxGeometry(len,.08,2.3),
+  // deck memanjang di z, dimiringkan sekitar sumbu x supaya ujung +z lebih rendah
+  const deck=new THREE.Mesh(new THREE.BoxGeometry(CHUTE_W,.08,len),
     new THREE.MeshStandardMaterial({color:0xA8B0BE,roughness:.4,metalness:.55}));
-  deck.position.set(mid[0],mid[1]-.06,0); deck.rotation.z=ang; g.add(deck);
-  for(const sz of [-1,1]){                            // pagar samping
-    const rail=new THREE.Mesh(new THREE.BoxGeometry(len,.26,.07),yellowMat);
-    rail.position.set(mid[0],mid[1]+.11,sz*1.18); rail.rotation.z=ang; g.add(rail);
+  deck.position.set(CHUTE_X,midY-.06,midZ); deck.rotation.x=CHUTE_ANG; g.add(deck);
+
+  for(const sx of [-1,1]){                            // pagar samping
+    const rail=new THREE.Mesh(new THREE.BoxGeometry(.07,.26,len),yellowMat);
+    rail.position.set(CHUTE_X+sx*CHUTE_W/2,midY+.11,midZ);
+    rail.rotation.x=CHUTE_ANG; g.add(rail);
   }
-  for(let i=0;i<9;i++){                               // roller: penanda "turun mulus"
+
+  // roller: sumbu HARUS dibaringkan ke x. CylinderGeometry default sumbunya y,
+  // tanpa rotasi ini rollernya berdiri tegak menembus deck.
+  for(let i=0;i<9;i++){
     const t=i/8;
-    const r=new THREE.Mesh(new THREE.CylinderGeometry(.075,.075,2.2,10),steelMat);
-    r.position.set(CHUTE_TOP[0]+dx*t, CHUTE_TOP[1]+dy*t+.02, 0);
-    g.add(r);
+    const r=new THREE.Mesh(new THREE.CylinderGeometry(.075,.075,CHUTE_W-.16,10),steelMat);
+    r.rotation.z=Math.PI/2;
+    r.position.set(CHUTE_X, yAt(t)+.02, CHUTE_Z0+dz*t); g.add(r);
   }
-  for(const [x,sz] of [[CHUTE_TOP[0]+.4,-1],[CHUTE_TOP[0]+.4,1],[CHUTE_BOT[0]-.3,-1],[CHUTE_BOT[0]-.3,1]]){
-    const y=CHUTE_TOP[1]+dy*((x-CHUTE_TOP[0])/dx);
-    const leg=new THREE.Mesh(new THREE.BoxGeometry(.1,y-.05,.1),steelMat);
-    leg.position.set(x,(y-.05)/2,sz*1.1); g.add(leg);
+
+  // kaki di empat sudut, puncaknya di bawah deck
+  for(const [t,sx] of [[.14,-1],[.14,1],[.88,-1],[.88,1]]){
+    const h=yAt(t)-.12;
+    const leg=new THREE.Mesh(new THREE.BoxGeometry(.1,h,.1),steelMat);
+    leg.position.set(CHUTE_X+sx*(CHUTE_W/2-.1), h/2, CHUTE_Z0+dz*t); g.add(leg);
   }
   return g;
 }
 
 /* ================= meja, rak, printer ================= */
 function makeTable(){
-  const g=new THREE.Group(); g.position.set(TABLE[0],0,TABLE[1]);
-  const top=new THREE.Mesh(new THREE.BoxGeometry(1.8,.08,2.6),
+  const g=new THREE.Group(); g.position.set(TABLE_X,0,TABLE_Z);
+  const top=new THREE.Mesh(new THREE.BoxGeometry(TABLE_W,.08,TABLE_D),
     new THREE.MeshStandardMaterial({color:0xB9A07C,roughness:.8}));
   top.position.y=TABLE_TOP-.04; g.add(top);
   for(const sx of [-1,1]) for(const sz of [-1,1]){
     const leg=new THREE.Mesh(new THREE.BoxGeometry(.09,TABLE_TOP-.08,.09),steelMat);
-    leg.position.set(sx*.78,(TABLE_TOP-.08)/2,sz*1.15); g.add(leg);
+    leg.position.set(sx*(TABLE_W/2-.12),(TABLE_TOP-.08)/2,sz*(TABLE_D/2-.12)); g.add(leg);
   }
   const lampArm=new THREE.Mesh(new THREE.BoxGeometry(.06,1.1,.06),steelMat);
-  lampArm.position.set(-.8,TABLE_TOP+.55,-1.1); g.add(lampArm);
+  lampArm.position.set(TABLE_W/2-.2,TABLE_TOP+.55,-TABLE_D/2+.15); g.add(lampArm);
   const lamp=new THREE.Mesh(new THREE.SphereGeometry(.13,10,8),
     new THREE.MeshStandardMaterial({color:0xFFF3D0,emissive:0xFFF3D0,emissiveIntensity:.8}));
-  lamp.position.set(-.6,TABLE_TOP+1.05,-1.0); g.add(lamp);
+  lamp.position.set(TABLE_W/2-.4,TABLE_TOP+1.05,-TABLE_D/2+.25); g.add(lamp);
   return g;
 }
 
 function makeRack(){
   const g=new THREE.Group(); g.position.set(RACK[0],0,RACK[1]);
-  for(const sz of [-1,1]) for(const sx of [-1,1]){
+  for(const sx of [-1,1]) for(const sz of [-1,1]){
     const u=new THREE.Mesh(new THREE.BoxGeometry(.09,2.3,.09),
       new THREE.MeshStandardMaterial({color:0x2F5C8C,roughness:.5,metalness:.35}));
-    u.position.set(sx*.5,1.15,sz*1.35); g.add(u);
+    u.position.set(sx*RACK_W/2,1.15,sz*.5); g.add(u);
   }
   RACK_Y.forEach(y=>{
-    const sh=new THREE.Mesh(new THREE.BoxGeometry(1.2,.06,2.8),
+    const sh=new THREE.Mesh(new THREE.BoxGeometry(RACK_W,.06,1.1),
       new THREE.MeshStandardMaterial({color:0x4A7CB0,roughness:.6,metalness:.3}));
     sh.position.y=y-.24; g.add(sh);
   });
   rackB=RACK_Y.map(y=>{
-    const b=makeBumper(); b.position.set(0,y,0); b.visible=false; g.add(b); return b;
+    const b=makeBumperWide(); b.position.set(0,y,0); b.visible=false; g.add(b); return b;
   });
   return g;
 }
@@ -321,9 +365,9 @@ function makeOperator(){
   const helm=new THREE.Mesh(new THREE.SphereGeometry(.155,10,6,0,Math.PI*2,0,Math.PI/2),
     new THREE.MeshStandardMaterial({color:0xE8B026,roughness:.5}));
   helm.position.y=1.14; g.add(helm);
-  bHand=makeBumper();
+  bHand=makeBumperWide();
   bHand.scale.setScalar(.92);
-  bHand.position.set(.05,.86,.34); bHand.rotation.x=.2;
+  bHand.position.set(0,.86,.36); bHand.rotation.x=.2;
   bHand.visible=false; g.add(bHand);
   return g;
 }
@@ -364,20 +408,24 @@ function makeTV(){
   tv=S.makeScreen(3.6,2.1,940,560);
   const g=new THREE.Group();
   g.position.set(TV[0],0,TV[2]); g.rotation.y=.60;    // menghadap kamera default
-  const pole=new THREE.Mesh(new THREE.BoxGeometry(.15,2.6,.15),steelMat);
-  pole.position.y=1.3; g.add(pole);
+  const bezelY=2.7, bezelH=2.3;
+  // tiang berhenti di tepi bawah bezel dan berada di BELAKANG layar (z negatif),
+  // kalau tidak ia menembus layar dan tampak sebagai garis vertikal di tengah
+  const poleH=bezelY-bezelH/2;
+  const pole=new THREE.Mesh(new THREE.BoxGeometry(.15,poleH,.15),steelMat);
+  pole.position.set(0,poleH/2,-.08); g.add(pole);
   const foot=new THREE.Mesh(new THREE.BoxGeometry(.9,.07,.55),steelMat);
-  foot.position.y=.035; g.add(foot);
-  const bezel=new THREE.Mesh(new THREE.BoxGeometry(3.8,2.3,.1),
+  foot.position.set(0,.035,-.08); g.add(foot);
+  const bezel=new THREE.Mesh(new THREE.BoxGeometry(3.8,bezelH,.1),
     new THREE.MeshStandardMaterial({color:C.station,roughness:.6}));
-  bezel.position.y=2.7; g.add(bezel);
-  tv.mesh.position.set(0,2.7,.06); g.add(tv.mesh);
+  bezel.position.y=bezelY; g.add(bezel);
+  tv.mesh.position.set(0,bezelY,.06); g.add(tv.mesh);
   return g;
 }
 
 /* ================= titik data panel → TV ================= */
 const DOT_A=new THREE.Vector3(PANEL[0],PANEL[1]+.4,PANEL[2]);
-const DOT_B=new THREE.Vector3(TV[0]-.5,2.7,TV[2]+.5);
+const DOT_B=new THREE.Vector3(TV[0]-.6,2.7,TV[2]+.6);
 function makeDots(){
   const g=new THREE.Group();
   const mat=new THREE.MeshBasicMaterial({color:C.screen});
@@ -418,11 +466,11 @@ const clamp01=t=>Math.max(0,Math.min(1,t));
 function buildWps(){
   const w=[];
   for(let i=0;i<SHOTS;i++){
-    w.push({x:OP.wait[0],  z:OP.wait[1],  face:-Math.PI/2, dwell:MACH_T,  event:'m'+i});
-    w.push({x:OP.table[0], z:OP.table[1], face:Math.PI,    dwell:CHECK_T, event:'c'+i});
-    w.push({x:OP.rack[0],  z:OP.rack[1],  face:2.36,       dwell:STORE_T, event:'s'+i});
+    w.push({x:OP.wait[0],  z:OP.wait[1],  face:FACE_WAIT,  dwell:MACH_T,  event:'m'+i});
+    w.push({x:OP.table[0], z:OP.table[1], face:FACE_TABLE, dwell:CHECK_T, event:'c'+i});
+    w.push({x:OP.rack[0],  z:OP.rack[1],  face:FACE_TABLE, dwell:STORE_T, event:'s'+i});
   }
-  w.push({x:OP.print[0], z:OP.print[1], face:Math.PI/2, dwell:PRINT_T, event:'p'});
+  w.push({x:OP.print[0], z:OP.print[1], face:FACE_TABLE, dwell:PRINT_T, event:'p'});
   return w;
 }
 
@@ -474,18 +522,16 @@ S.register('injection',{
     S.groups.concept.add(makeTV());
     dots=makeDots(); S.groups.concept.add(dots);
 
-    bChute=makeBumper(); bChute.visible=false; S.groups.concept.add(bChute);
-    bTable=makeBumper(); bTable.position.set(LAND[0],LAND[1],TABLE[1]);
+    bChute=makeBumperWide(); bChute.visible=false; S.groups.concept.add(bChute);
+    bTable=makeBumperWide();
+    bTable.position.set(TABLE_X,TABLE_TOP+PART_REST,LAND_Z);
     bTable.visible=false; S.groups.concept.add(bTable);
 
     S.addLabel('MESIN INJECTION',null,-5.6,4.4,0,1.3);
-    S.addLabel('ROBOT TAKEOUT','#E8B026',-1.0,RAIL_Y+.7,0,1.2);
-    S.addLabel('PANEL AKUISISI','#3ED0C2',PANEL[0]-.3,PANEL[1]+1.0,PANEL[2],1.1);
-    S.addLabel('SELUNCURAN','#E9EBEE',3.5,3.3,0,1.1);
-    S.addLabel('MEJA CEK','#E9EBEE',TABLE[0],2.0,TABLE[1],1.1);
+    S.addLabel('IoT Node','#3ED0C2',PANEL[0]-.3,PANEL[1]+1.0,PANEL[2],1.1);
+    S.addLabel('MEJA CEK','#E9EBEE',TABLE_X,2.0,TABLE_Z,1.1);
     S.addLabel('RAK OK','#9CC4EA',RACK[0],2.7,RACK[1],1.1);
-    S.addLabel('PRINTER LABEL','#E9EBEE',PRINTER[0]+.2,1.75,PRINTER[1],1.1);
-    S.addLabel('MONITORING','#3ED0C2',TV[0]-1.3,4.3,TV[2],1.2);
+    S.addLabel('PRINTER LABEL','#E9EBEE',PRINTER[0],1.8,PRINTER[1],1.1);
 
     S.actor=makeOperator();
 
@@ -503,7 +549,7 @@ S.register('injection',{
 
   reset(){
     platen.position.x=PLATEN_CLOSED;
-    robCar.position.x=HOME_X; setArm(ARM_MIN);
+    robCar.position.x=HOME_X; setArm(ARM_MIN); effector.rotation.y=0;
     bMold.visible=false; bRobot.visible=false;
     bChute.visible=false; bTable.visible=false; bHand.visible=false;
     rackB.forEach(b=>b.visible=false);
@@ -540,8 +586,8 @@ S.register('injection',{
 
     /* ---- robot: keyframe x carriage + panjang arm ---- */
     if(el>=0){
-      const [rx,len]=keyLerp(RK,el);
-      robCar.position.x=rx; setArm(len);
+      const [rx,len,ry]=keyLerp(RK,el);
+      robCar.position.x=rx; setArm(len); effector.rotation.y=ry;
     }
 
     /* ---- posisi bumper: satu sumber kebenaran untuk semua fase ---- */
@@ -556,10 +602,10 @@ S.register('injection',{
       else if(e<RELEASE_AT)      bRobot.visible=true;
       else if(e<LAND_AT){
         const t=smooth(clamp01((e-RELEASE_AT)/(LAND_AT-RELEASE_AT)));
+        const y0=CHUTE_Y0+PART_REST, y1=TABLE_TOP+PART_REST;
         bChute.visible=true;
-        bChute.position.set(CHUTE_TOP[0]+(LAND[0]-CHUTE_TOP[0])*t,
-                            CHUTE_TOP[1]+(LAND[1]-CHUTE_TOP[1])*t, TABLE[1]);
-        bChute.rotation.z=-.32*(1-t);        // ikut kemiringan seluncuran, rata di meja
+        bChute.position.set(CHUTE_X, y0+(y1-y0)*t, CHUTE_Z0+(LAND_Z-CHUTE_Z0)*t);
+        bChute.rotation.x=CHUTE_ANG*(1-t);   // ikut kemiringan seluncuran, rata di meja
       }
       else if(cw && ct<cw[1])    bTable.visible=true;
       else                       bHand.visible=true;

@@ -16,8 +16,8 @@
    ============================================================ */
 window.SIMLAY_CONFIG = {
   show: [
-    'warehouse',
     'injection',
-    'vault'
+    'warehouse'
+    // 'vault'
   ]
 };
