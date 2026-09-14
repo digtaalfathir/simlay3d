@@ -6,6 +6,9 @@
    (torsi + sudut) kembali ke middleware dan tampil di monitoring.
    Stopper baru turun setelah semua baut OK.
 
+   Tool dan scanner mengirim data langsung ke server middleware, tanpa
+   IoT node di station. Di animasi, layar monitoring mewakili server itu.
+
    Aktor timeline = OPERATOR, dengan tiga dwell: arrive, work, done.
    Keenam baut dijangkau dari satu posisi kerja; jadwal per baut
    dihitung stepWindows(), satu sumber untuk tick() dan test.
@@ -51,7 +54,6 @@ const MAX_REACH=1.25;
 const SPEED=1.2;
 const HOVER=0.14;                   // tinggi socket melayang di atas baut
 const SCANNER=[-1.1,-0.95];
-const IOT=[2.1,1.35,-1.05];
 const STACK=[1.0,-0.8];
 const BAL_POST=[0.1,-0.85];         // tiang tool balancer
 const BALANCER=new THREE.Vector3(0.1,2.3,0.25);
@@ -86,7 +88,7 @@ const ROW_STYLE={wait:['MENUNGGU','#5B6478'], active:['PROSES','#FFB020'],
                  ng:['NG','#FF5A5F'], retry:['ULANG','#FFB020'], ok:['OK','#46C46E']};
 
 let carrier=null, stopper=null, bolts=[], tool=null, toolScr=null, arm=null, cable=null;
-let stack=null, scanBeam=null, iotLed=null, tv=null, dotsScan=null, dotsJob=null, dotsRes=null;
+let stack=null, scanBeam=null, tv=null, dotsScan=null, dotsJob=null, dotsRes=null;
 let ngMode=false;
 const st={ sig:'' };
 
@@ -184,7 +186,7 @@ function makeBalancer(){
   return g;
 }
 
-/* ================= scanner, IoT node, stack light ================= */
+/* ================= scanner & stack light ================= */
 function makeScanner(){
   const g=new THREE.Group(); g.position.set(SCANNER[0],0,SCANNER[1]);
   const post=new THREE.Mesh(new THREE.BoxGeometry(.07,1.0,.07),steelMat);
@@ -193,21 +195,6 @@ function makeScanner(){
   head.position.y=1.05; g.add(head);
   scanBeam=unitRod(.008,new THREE.MeshBasicMaterial({color:0xFF4040,transparent:true,opacity:.75}));
   scanBeam.visible=false;
-  return g;
-}
-
-function makeIoT(){
-  const g=new THREE.Group(); g.position.set(IOT[0],0,IOT[2]);
-  const post=new THREE.Mesh(new THREE.BoxGeometry(.07,IOT[1]-.23,.07),steelMat);
-  post.position.y=(IOT[1]-.23)/2; g.add(post);
-  const box=new THREE.Mesh(new THREE.BoxGeometry(.34,.46,.18),
-    new THREE.MeshStandardMaterial({color:0xC7CBD3,roughness:.5,metalness:.3}));
-  box.position.y=IOT[1]; g.add(box);
-  const ant=new THREE.Mesh(new THREE.CylinderGeometry(.012,.012,.22,6),darkMat);
-  ant.position.set(.11,IOT[1]+.34,0); g.add(ant);
-  iotLed=new THREE.Mesh(new THREE.SphereGeometry(.035,8,6),
-    new THREE.MeshStandardMaterial({color:C.screen,emissive:C.screen,emissiveIntensity:.4}));
-  iotLed.position.set(.1,IOT[1]+.14,.095); g.add(iotLed);
   return g;
 }
 
@@ -319,7 +306,7 @@ function makeTV(){
 
 /* ================= titik data ================= */
 const DOT_SCAN=new THREE.Vector3(SCANNER[0],1.1,SCANNER[1]);
-const DOT_IOT =new THREE.Vector3(IOT[0],IOT[1]+.25,IOT[2]);
+const DOT_TV  =new THREE.Vector3(TV[0]-.3,2.5,TV[2]+.2);    // layar monitoring = ujung server middleware
 function makeDots(){
   const g=new THREE.Group();
   const mat=new THREE.MeshBasicMaterial({color:C.screen});
@@ -442,7 +429,7 @@ S.register('tightening',{
   theme:{ light:{floor:0xAEB4BE}, dark:{floor:0x22262F} },
   legend:[
     ['#5E6675','Sub-assembly'],['#FFB020','Baut diproses'],['#46C46E','Baut OK'],
-    ['#E5484D','Baut NG'],['#3ED0C2','IoT Node / data'],['#E8B026','Tool']
+    ['#E5484D','Baut NG'],['#3ED0C2','Data ke middleware'],['#E8B026','Tool']
   ],
   scenarios:{
     normal:{
@@ -475,13 +462,12 @@ S.register('tightening',{
     carrier=makeCarrier(); S.groups.concept.add(carrier);
     S.groups.concept.add(makeBalancer());
     tool=makeTool(); S.groups.concept.add(tool);
-    S.groups.concept.add(makeScanner(), makeIoT(), makeStack(), makeTV());
+    S.groups.concept.add(makeScanner(), makeStack(), makeTV());
     S.groups.concept.add(scanBeam);
     dotsScan=makeDots(); dotsJob=makeDots(); dotsRes=makeDots();
     S.groups.concept.add(dotsScan, dotsJob, dotsRes);
 
     S.addLabel('SCAN VIN','#E9EBEE',SCANNER[0],1.8,SCANNER[1],1.0);
-    S.addLabel('IoT Node','#3ED0C2',IOT[0],IOT[1]+.7,IOT[2],1.0);
     S.addLabel('STOPPER','#E9EBEE',STOPPER_X+.55,1.25,.35,.9);
 
     S.actor=makeOperator();
@@ -561,10 +547,11 @@ S.register('tightening',{
     scanBeam.visible=scanning;
     if(scanning){ _b.set(carrier.position.x-.55,CONV_Y+.04,-.42); aimRod(scanBeam,DOT_SCAN,_b); }
 
-    /* ---- data: VIN → IoT Node, job → tool, hasil tiap baut → IoT Node ---- */
+    /* ---- data langsung ke/dari server middleware: VIN keluar, job masuk ke tool,
+            hasil tiap baut keluar dari tool ---- */
     _a.copy(tool.position).y+=.16;
-    tickDots(dotsScan, win.arrive ? ct-(win.arrive[0]+SCAN_AT) : -1, DOT_SCAN, DOT_IOT);
-    tickDots(dotsJob,  win.arrive ? ct-(win.arrive[0]+JOB_AT)  : -1, DOT_IOT, _a);
+    tickDots(dotsScan, win.arrive ? ct-(win.arrive[0]+SCAN_AT) : -1, DOT_SCAN, DOT_TV);
+    tickDots(dotsJob,  win.arrive ? ct-(win.arrive[0]+JOB_AT)  : -1, DOT_TV, _a);
     let lastRes=-99;
     if(steps) SEQUENCE.forEach((b,i)=>{
       const t0=steps[i][0];
@@ -572,9 +559,7 @@ S.register('tightening',{
         if(ct>=t0+at) lastRes=Math.max(lastRes,t0+at);
       });
     });
-    tickDots(dotsRes, ct-lastRes, _a, DOT_IOT);
-    const busy = [dotsScan,dotsJob,dotsRes].some(g=>g.children.some(d=>d.visible));
-    iotLed.material.emissiveIntensity = busy ? ((ct%.2)<.1?1.6:.5) : .4;
+    tickDots(dotsRes, ct-lastRes, _a, DOT_TV);
 
     const sig=sigOf(s);
     if(sig!==st.sig){ st.sig=sig; drawTV(s); }
@@ -595,10 +580,6 @@ S.register('tightening',{
     }
     if(steps && ct>=steps[steps.length-1][1] && !s.released) return {flow:'allok'};
     return null;
-  },
-
-  idle(t){
-    if(iotLed) iotLed.material.emissiveIntensity=.3+.2*Math.sin(t*2.5);
   }
 });
 })(window.SIMLAY);
