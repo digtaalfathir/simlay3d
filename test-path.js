@@ -9,6 +9,7 @@ const vaultSrc = read('js/anim-vault.js');
 const whSrc = read('js/anim-warehouse.js');
 const injSrc = read('js/anim-injection.js');
 const ptlSrc = read('js/anim-picktolamp.js');
+const tgtSrc = read('js/anim-tightening.js');
 const cfgSrc = read('animations.js');
 
 function slice(src, from, to, what){
@@ -38,7 +39,7 @@ const buildTimeline = new Function(
    1. animations.js — setiap id harus benar-benar terdaftar
    ============================================================ */
 const cfg = new Function('const window={};' + cfgSrc + 'return window.SIMLAY_CONFIG;')();
-const registered = [coreSrc, vaultSrc, whSrc, injSrc, ptlSrc]
+const registered = [coreSrc, vaultSrc, whSrc, injSrc, ptlSrc, tgtSrc]
   .flatMap(s => [...s.matchAll(/S\.register\(\s*'([^']+)'/g)].map(m => m[1]));
 assert.ok(cfg && Array.isArray(cfg.show), 'animations.js harus mengekspor show[]');
 assert.ok(cfg.show.length > 0, 'animations.js: show[] kosong, tidak ada yang tampil');
@@ -420,6 +421,86 @@ for(const withWrong of [false, true]){
   assert.ok(tl.win.done[0] > tl.win['p'+(ptl.ORDER.length-1)][1], `${who}: cart dilepas sebelum pick terakhir selesai`);
 }
 
+/* ============================================================
+   6. Tightening Tool — urutan job, counter, dan stopper
+   ============================================================ */
+const TGT_NAMES = ['CONV_W','BOLTS','SEQUENCE','NG_STEP','SPEC_NM','TOL_NM','RESULTS','NG_RESULT',
+  'WORK','HOME','MAX_REACH','SPEED',
+  'ARRIVE_T','MOVE_END','SCAN_AT','JOB_AT','STEP_T','APPROACH_AT','RESULT_AT',
+  'RETRY_START','RETRY_OK_AT','NG_STEP_T','DONE_T','RELEASE_AT','STOPPER_T','RELEASE_MOVE'];
+const tgt = new Function(consts(tgtSrc, TGT_NAMES) + '\n' +
+  slice(tgtSrc, 'function workDuration(', '\n/* ================= registrasi', 'tightening') +
+  '\nreturn {' + TGT_NAMES.join(',') + ',workDuration,stepWindows,okAt,okCountAt,buildWps};')();
+
+/* job: setiap baut dikencangkan tepat satu kali, hasil OK memang masuk spek */
+assert.deepStrictEqual(tgt.SEQUENCE.slice().sort((a, b) => a - b), tgt.BOLTS.map((_, i) => i),
+  'tightening: urutan job harus memuat setiap baut tepat satu kali');
+assert.strictEqual(tgt.RESULTS.length, tgt.SEQUENCE.length, 'tightening: jumlah hasil tidak sama dengan jumlah langkah');
+const tgtLo = tgt.SPEC_NM - tgt.TOL_NM, tgtHi = tgt.SPEC_NM + tgt.TOL_NM;
+tgt.RESULTS.forEach((r, k) => assert.ok(r.nm >= tgtLo && r.nm <= tgtHi,
+  `tightening: hasil langkah ${k+1} (${r.nm} Nm) di luar spek padahal ditampilkan OK`));
+assert.ok(tgt.NG_RESULT.nm < tgtLo || tgt.NG_RESULT.nm > tgtHi,
+  `tightening: hasil NG (${tgt.NG_RESULT.nm} Nm) justru masuk spek`);
+assert.ok(tgt.NG_STEP >= 1 && tgt.NG_STEP < tgt.SEQUENCE.length, 'tightening: NG_STEP di luar urutan');
+
+/* urutan fase */
+assert.ok(tgt.MOVE_END < tgt.SCAN_AT && tgt.SCAN_AT < tgt.JOB_AT && tgt.JOB_AT < tgt.ARRIVE_T,
+  'tightening: carrier berhenti → scan VIN → job diterima tidak berurutan di dalam ARRIVE_T');
+assert.ok(tgt.APPROACH_AT < tgt.RESULT_AT && tgt.RESULT_AT < tgt.STEP_T, 'tightening: fase satu baut tidak muat dalam STEP_T');
+assert.ok(tgt.RESULT_AT < tgt.RETRY_START && tgt.RETRY_START < tgt.RETRY_OK_AT && tgt.RETRY_OK_AT < tgt.NG_STEP_T,
+  'tightening: fase NG → kencangkan ulang → OK tidak muat dalam NG_STEP_T');
+assert.ok(tgt.RELEASE_AT + tgt.STOPPER_T + tgt.RELEASE_MOVE <= tgt.DONE_T, 'tightening: carrier belum keluar saat dwell done habis');
+
+/* jangkauan: operator di luar conveyor, semua baut terjangkau dari satu posisi kerja */
+assert.ok(tgt.WORK[1] - tgt.CONV_W/2 > .25, 'tightening: posisi kerja operator di atas conveyor');
+assert.ok(tgt.HOME[1] - tgt.CONV_W/2 > .25, 'tightening: posisi tunggu operator di atas conveyor');
+tgt.BOLTS.forEach(([bx, bz], i) => {
+  const d = Math.hypot(bx - tgt.WORK[0], bz - tgt.WORK[1]);
+  assert.ok(d <= tgt.MAX_REACH, `tightening: B${i+1} berjarak ${d.toFixed(2)} m, di luar jangkauan ${tgt.MAX_REACH} m`);
+});
+
+for(const withNG of [false, true]){
+  const who = 'tightening/' + (withNG ? 'ng' : 'normal');
+  const wps = tgt.buildWps(withNG);
+  wps.forEach((p, i) => {
+    if(i) assert.ok(Math.hypot(p.x-wps[i-1].x, p.z-wps[i-1].z) > .05, `${who}: waypoint ${i-1} dan ${i} di titik yang sama`);
+  });
+  const tl = buildTimeline(wps, tgt.SPEED);
+  checkTimeline(tl, who);
+  const { arrive, work, done } = tl.win;
+  assert.ok(arrive && work && done, `${who}: window arrive / work / done hilang`);
+  assert.ok(Math.abs((work[1] - work[0]) - tgt.workDuration(withNG)) < 1e-9, `${who}: dwell work tidak sama dengan total langkah`);
+
+  const steps = tgt.stepWindows(work[0], withNG);
+  assert.strictEqual(steps[0][0], work[0], `${who}: langkah pertama tidak mulai di awal work`);
+  steps.forEach((s, k) => {
+    if(k) assert.ok(Math.abs(s[0] - steps[k-1][1]) < 1e-9, `${who}: ada celah antara langkah ${k} dan ${k+1}`);
+    assert.ok(tgt.okAt(k, steps, withNG) < s[1], `${who}: baut langkah ${k+1} baru OK setelah langkahnya selesai`);
+  });
+  assert.ok(Math.abs(steps[steps.length-1][1] - work[1]) < 1e-9, `${who}: langkah terakhir tidak berakhir tepat di akhir work`);
+
+  /* tool baru bekerja setelah job diterima */
+  assert.ok(arrive[0] + tgt.JOB_AT < work[0], `${who}: tool mulai mengencangkan sebelum job diterima`);
+
+  /* INTI: stopper tidak turun sebelum semua baut OK */
+  const releaseAt = done[0] + tgt.RELEASE_AT;
+  const lastOk = Math.max(...steps.map((_, k) => tgt.okAt(k, steps, withNG)));
+  assert.ok(releaseAt > lastOk, `${who}: carrier dilepas sebelum baut terakhir OK`);
+  assert.strictEqual(tgt.okCountAt(releaseAt, steps, withNG), tgt.SEQUENCE.length, `${who}: carrier dilepas dengan counter belum penuh`);
+  /* counter naik satu per satu mengikuti urutan job */
+  steps.forEach((_, k) => assert.strictEqual(tgt.okCountAt(tgt.okAt(k, steps, withNG), steps, withNG), k + 1,
+    `${who}: counter tidak bernilai ${k+1} tepat saat langkah ${k+1} OK`));
+
+  if(withNG){
+    const ngAt = steps[tgt.NG_STEP][0] + tgt.RESULT_AT;
+    const okNg = tgt.okAt(tgt.NG_STEP, steps, withNG);
+    assert.strictEqual(tgt.okCountAt(ngAt + 1e-6, steps, withNG), tgt.NG_STEP, `${who}: counter tidak tertahan saat baut NG`);
+    assert.strictEqual(tgt.okCountAt(okNg - 1e-6, steps, withNG), tgt.NG_STEP, `${who}: counter naik sebelum baut NG dikencangkan ulang`);
+    assert.ok(okNg - ngAt >= .5, `${who}: jeda NG → OK terlalu singkat untuk terlihat`);
+  }
+}
+
 console.log('OK — konfigurasi, vault (2 skenario x 2 konsep), gudang ('
   + Object.keys(WPS).length + ' arah alur), injection (' + inj.SHOTS
-  + ' shot), pick to lamp (' + ptl.ORDER.length + ' pick x 2 skenario) lolos semua pemeriksaan');
+  + ' shot), pick to lamp (' + ptl.ORDER.length + ' pick x 2 skenario), tightening ('
+  + tgt.SEQUENCE.length + ' baut x 2 skenario) lolos semua pemeriksaan');
