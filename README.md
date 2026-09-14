@@ -56,6 +56,14 @@ berikutnya menyala. Tiap konfirmasi mengalir ke layar monitoring; setelah 3 pick
 kit dikirim ke line. Skenario *salah ambil*: tombol bin tetangga ditekan → modul itu
 berkedip merah dan pick ditolak, sementara lampu bin yang benar tetap hijau.
 
+**Tightening Tool · Open Protocol.** Carrier membawa sub-assembly ke station dan ditahan
+stopper. VIN discan, middleware mengirim job ke tool lewat Open Protocol (6 baut,
+45 Nm ±3, urutan dari tengah menyilang ke luar), lalu operator mengencangkan baut satu
+per satu. Cincin tiap baut berubah hijau saat lolos spek, torsi dan sudutnya kembali ke
+middleware dan tampil di monitoring. Stopper baru turun setelah 6/6 OK. Skenario *NG
+kurang torsi*: baut urutan ke-4 hanya 41.6 Nm → cincin merah, stack light merah, counter
+tertahan 3/6, dan carrier tetap ditahan sampai baut itu dikencangkan ulang.
+
 **Gold Vault · RFID.** Studi tata letak rak emas dan antena RFID di ruang
 12 × 8 × 3.2 m, dua konsep penempatan, plus simulasi alur petugas dari scan SPK
 sampai verifikasi keluar. Punya dua skenario:
@@ -133,6 +141,7 @@ js/core.js              # renderer, kamera, orbit, tema, label, gate, timeline, 
 js/anim-warehouse.js    # animasi gudang
 js/anim-injection.js    # animasi injection molding
 js/anim-picktolamp.js   # animasi pick to lamp
+js/anim-tightening.js   # animasi tightening tool
 js/anim-vault.js        # animasi gold vault
 test-path.js            # pemeriksaan jalur & konfigurasi — node test-path.js
 ```
@@ -218,6 +227,9 @@ dari sumber, jadi tidak ada logika yang diduplikasi di test. Yang dijaga:
 - pick to lamp: lampu tiap pick sudah menyala minimal 0.3 s sebelum operator tiba,
   tidak pernah ada dua lampu menyala bersamaan, dan pada skenario salah ambil lampu
   bin yang benar tetap menyala sepanjang kejadian
+- tightening: urutan job memuat tiap baut tepat sekali, hasil OK masuk spek dan hasil NG
+  di luar spek, counter naik satu per satu, pada skenario NG counter tertahan sampai
+  baut dikencangkan ulang, dan stopper tidak pernah turun sebelum semua baut OK
 
 ## Catatan
 

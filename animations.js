@@ -13,6 +13,7 @@
      'warehouse' — Gudang: forklift lewat RFID gate, data ke WMS
      'injection' — Injection molding: hitung shot, robot takeout, label otomatis
      'picktolamp' — Pick to lamp: lampu di flow rack memandu kitting
+     'tightening' — Tightening tool: job per VIN, hasil per baut, stopper
      'vault'     — Gold Vault: tata letak rak & antena RFID
    ============================================================ */
 window.SIMLAY_CONFIG = {
@@ -20,6 +21,7 @@ window.SIMLAY_CONFIG = {
     'injection',
     'warehouse',
     'vault',
-    'picktolamp'
+    'picktolamp',
+    'tightening'
   ]
 };
