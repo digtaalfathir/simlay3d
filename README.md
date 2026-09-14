@@ -49,6 +49,13 @@ dianimasikan.
 Cycle time yang ditampilkan (42.5 s) adalah angka nyata; durasi animasinya dipadatkan
 supaya satu putaran ~40 s.
 
+**Pick to Lamp · Kitting.** Operator scan kanban kit di terminal, order dari middleware
+dimuat ke IoT Node, lalu lampu di flow rack memandu pengambilan: modul di depan bin
+menyala hijau dengan angka qty, operator ambil, tekan tombol, lampu padam, dan lampu
+berikutnya menyala. Tiap konfirmasi mengalir ke layar monitoring; setelah 3 pick cart
+kit dikirim ke line. Skenario *salah ambil*: tombol bin tetangga ditekan → modul itu
+berkedip merah dan pick ditolak, sementara lampu bin yang benar tetap hijau.
+
 **Gold Vault · RFID.** Studi tata letak rak emas dan antena RFID di ruang
 12 × 8 × 3.2 m, dua konsep penempatan, plus simulasi alur petugas dari scan SPK
 sampai verifikasi keluar. Punya dua skenario:
@@ -125,6 +132,7 @@ animations.js           # daftar animasi yang tampil — satu-satunya file konfi
 js/core.js              # renderer, kamera, orbit, tema, label, gate, timeline, UI, rekam
 js/anim-warehouse.js    # animasi gudang
 js/anim-injection.js    # animasi injection molding
+js/anim-picktolamp.js   # animasi pick to lamp
 js/anim-vault.js        # animasi gold vault
 test-path.js            # pemeriksaan jalur & konfigurasi — node test-path.js
 ```
@@ -207,6 +215,9 @@ dari sumber, jadi tidak ada logika yang diduplikasi di test. Yang dijaga:
   ujung seluncuran, dan menggeser part di atas puncak platen
 - injection: bumper sudah mendarat di meja sebelum operator tiba memeriksa — kalau
   tidak, operator memeriksa meja kosong
+- pick to lamp: lampu tiap pick sudah menyala minimal 0.3 s sebelum operator tiba,
+  tidak pernah ada dua lampu menyala bersamaan, dan pada skenario salah ambil lampu
+  bin yang benar tetap menyala sepanjang kejadian
 
 ## Catatan
 

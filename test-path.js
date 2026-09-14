@@ -8,6 +8,7 @@ const coreSrc = read('js/core.js');
 const vaultSrc = read('js/anim-vault.js');
 const whSrc = read('js/anim-warehouse.js');
 const injSrc = read('js/anim-injection.js');
+const ptlSrc = read('js/anim-picktolamp.js');
 const cfgSrc = read('animations.js');
 
 function slice(src, from, to, what){
@@ -37,7 +38,7 @@ const buildTimeline = new Function(
    1. animations.js — setiap id harus benar-benar terdaftar
    ============================================================ */
 const cfg = new Function('const window={};' + cfgSrc + 'return window.SIMLAY_CONFIG;')();
-const registered = [coreSrc, vaultSrc, whSrc, injSrc]
+const registered = [coreSrc, vaultSrc, whSrc, injSrc, ptlSrc]
   .flatMap(s => [...s.matchAll(/S\.register\(\s*'([^']+)'/g)].map(m => m[1]));
 assert.ok(cfg && Array.isArray(cfg.show), 'animations.js harus mengekspor show[]');
 assert.ok(cfg.show.length > 0, 'animations.js: show[] kosong, tidak ada yang tampil');
@@ -352,6 +353,73 @@ for(let i = 0; i < inj.SHOTS; i++){
 assert.ok(injTl.win.p[0] > injTl.win['s'+(inj.SHOTS-1)][1] - .01,
   'injection: printer mencetak sebelum rak penuh');
 
+/* ============================================================
+   5. Pick to Lamp — lampu, operator, dan cart harus sinkron
+   ============================================================ */
+const PTL_NAMES = ['COLS','LEVELS','BAY_W','RACK_X0','COL_X','LEVEL_Y','RACK_FRONT','RACK_DEPTH','OP_Z',
+  'HOME','END','CART_SLOTS','SPEED','ORDER','WRONG','DIGIT_MAX',
+  'SCAN_T','SCAN_LIT','PICK_T','REACH_AT','PRESS_AT','PUT_AT','WRONG_T','WRONG_AT','DONE_T','RELEASE_AT'];
+const ptl = new Function(consts(ptlSrc, PTL_NAMES) + '\n' +
+  slice(ptlSrc, 'function lampWindow(', '\n/* ================= registrasi', 'picktolamp') +
+  '\nreturn {' + PTL_NAMES.join(',') + ',lampWindow,buildWps};')();
+
+/* urutan fase di dalam satu dwell */
+assert.ok(ptl.REACH_AT < ptl.PRESS_AT && ptl.PRESS_AT < ptl.PUT_AT && ptl.PUT_AT < ptl.PICK_T,
+  'picktolamp: urutan raih → tekan tombol → masuk cart tidak muat dalam PICK_T');
+assert.ok(ptl.SCAN_LIT < ptl.SCAN_T, 'picktolamp: lampu pertama baru menyala setelah scan selesai');
+assert.ok(ptl.WRONG_AT < ptl.WRONG_T, 'picktolamp: tombol bin salah ditekan setelah dwell-nya habis');
+assert.ok(ptl.RELEASE_AT < ptl.DONE_T, 'picktolamp: cart dilepas setelah dwell done habis');
+
+/* order harus valid terhadap rak dan perangkat */
+const binKey = b => b.col + ':' + b.lvl;
+assert.strictEqual(ptl.COL_X.length, ptl.COLS, 'picktolamp: jumlah posisi kolom tidak cocok dengan COLS');
+assert.strictEqual(ptl.LEVEL_Y.length, ptl.LEVELS, 'picktolamp: jumlah level tidak cocok dengan LEVELS');
+assert.strictEqual(new Set(ptl.ORDER.map(binKey)).size, ptl.ORDER.length, 'picktolamp: dua pick di bin yang sama');
+ptl.ORDER.forEach((o, i) => {
+  assert.ok(o.col >= 0 && o.col < ptl.COLS && o.lvl >= 0 && o.lvl < ptl.LEVELS, `picktolamp: pick ${i} di luar rak`);
+  assert.ok(o.qty >= 1 && o.qty <= ptl.DIGIT_MAX, `picktolamp: qty pick ${i} (${o.qty}) tidak punya tampilan angka`);
+});
+assert.ok(ptl.ORDER.length <= ptl.CART_SLOTS, 'picktolamp: slot cart tidak cukup untuk semua pick');
+assert.ok(!ptl.ORDER.some(o => binKey(o) === binKey(ptl.WRONG)), 'picktolamp: bin "salah" ternyata bin yang ada di order');
+assert.ok(ptl.WRONG.before >= 1 && ptl.WRONG.before < ptl.ORDER.length, 'picktolamp: WRONG.before di luar urutan pick');
+const ptlReach = ptl.OP_Z - ptl.RACK_FRONT;
+assert.ok(ptlReach > .5 && ptlReach < 1.4,
+  `picktolamp: operator berdiri ${ptlReach.toFixed(2)} m dari muka rak — terlalu dekat atau tidak terjangkau`);
+
+for(const withWrong of [false, true]){
+  const who = 'picktolamp/' + (withWrong ? 'salah-ambil' : 'normal');
+  const wps = ptl.buildWps(withWrong);
+  wps.forEach((p, i) => {
+    if(i) assert.ok(Math.hypot(p.x-wps[i-1].x, p.z-wps[i-1].z) > .05, `${who}: waypoint ${i-1} dan ${i} di titik yang sama`);
+  });
+  const tl = buildTimeline(wps, ptl.SPEED);
+  checkTimeline(tl, who);
+  assert.ok(tl.win.scan && tl.win.done, `${who}: window scan / done hilang`);
+  assert.strictEqual(!!tl.win.wrong, withWrong, `${who}: window wrong ${withWrong ? 'hilang' : 'muncul di skenario normal'}`);
+
+  ptl.ORDER.forEach((o, i) => {
+    const pw = tl.win['p'+i];
+    assert.ok(pw, `${who}: window p${i} hilang`);
+    assert.strictEqual(wps.find(p => p.event === 'p'+i).x, ptl.COL_X[o.col], `${who}: operator tidak berdiri di depan bin pick ${i}`);
+    const [on, off] = ptl.lampWindow(i, tl.win);
+    /* INTI: lampu sudah menyala sebelum operator tiba — operator mengikuti lampu, bukan sebaliknya */
+    assert.ok(pw[0] - on >= .3, `${who}: lampu pick ${i} baru menyala ${(pw[0]-on).toFixed(2)} s sebelum operator tiba`);
+    assert.ok(off > pw[0] && off < pw[1], `${who}: lampu pick ${i} padam di luar dwell pick-nya`);
+    if(i) assert.ok(ptl.lampWindow(i-1, tl.win)[1] <= on + 1e-9, `${who}: dua lampu menyala bersamaan`);
+  });
+
+  if(withWrong){
+    const ww = tl.win.wrong, b = ptl.WRONG.before;
+    const [on, off] = ptl.lampWindow(b, tl.win);
+    assert.ok(ww[0] > tl.win['p'+(b-1)][1] && ww[1] < tl.win['p'+b][0],
+      `${who}: salah ambil tidak terjadi di antara pick ${b-1} dan ${b}`);
+    /* lampu bin yang benar tetap hijau selama salah ambil, supaya operator tahu harus ke mana */
+    assert.ok(on <= ww[0] && off >= ww[1], `${who}: lampu bin yang benar tidak menyala saat salah ambil`);
+    assert.strictEqual(wps.find(p => p.event === 'wrong').x, ptl.COL_X[ptl.WRONG.col], `${who}: operator tidak di depan bin yang salah`);
+  }
+  assert.ok(tl.win.done[0] > tl.win['p'+(ptl.ORDER.length-1)][1], `${who}: cart dilepas sebelum pick terakhir selesai`);
+}
+
 console.log('OK — konfigurasi, vault (2 skenario x 2 konsep), gudang ('
   + Object.keys(WPS).length + ' arah alur), injection (' + inj.SHOTS
-  + ' shot) lolos semua pemeriksaan');
+  + ' shot), pick to lamp (' + ptl.ORDER.length + ' pick x 2 skenario) lolos semua pemeriksaan');
